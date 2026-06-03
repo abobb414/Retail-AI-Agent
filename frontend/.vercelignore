@@ -1,13 +1,13 @@
-.vercel
 .env
 .env.local
 .env.*.local
+.vercel
 node_modules
 .nuxt
 .output
 .data
+.DS_Store
 .vercel-local-page.png
 .vercel-product-card.png
 .vercel-deployed-product-card.png
-.DS_Store
 npm-debug.log*

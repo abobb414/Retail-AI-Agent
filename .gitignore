@@ -12,6 +12,7 @@ backend/**/*.pyc
 
 .env
 .env.*
+!.env.example
+!frontend/.env.example
 
 frontend/.run/
-

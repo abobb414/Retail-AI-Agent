@@ -21,36 +21,22 @@
             <circle cx="12" cy="8" r="3.2" />
             <path d="M6.8 18.2C7.5 15.8 9.5 14.4 12 14.4C14.5 14.4 16.5 15.8 17.2 18.2" />
           </svg>
-          <span class="sr-only">
-            {{ message.role === 'assistant' ? '顾问头像' : '用户头像' }}
-          </span>
+          <span class="sr-only">{{ message.role === 'assistant' ? '顾问头像' : '用户头像' }}</span>
         </div>
 
         <div class="max-w-[84%] space-y-3">
           <div
             class="message-bubble rounded-[24px] px-4 py-3 text-[15px] font-normal leading-7 shadow-[0_16px_36px_rgba(140,156,176,0.12)]"
-            :class="message.role === 'assistant'
-              ? 'assistant-bubble text-slate-700'
-              : 'user-bubble text-slate-700'"
+            :class="message.role === 'assistant' ? 'assistant-bubble text-slate-700' : 'user-bubble text-slate-700'"
           >
-            <template v-if="message.content">
-              <div class="whitespace-pre-line">
-                {{ message.content }}
-              </div>
-            </template>
-            <template v-else-if="message.isStreaming">
-              <span class="streaming-dots" aria-label="顾问正在回复">
-                <span />
-                <span />
-                <span />
-              </span>
-            </template>
+            <MessageText v-if="message.content" :content="message.content" />
+            <span v-else-if="message.isStreaming" class="streaming-dots" aria-label="顾问正在回复">
+              <span />
+              <span />
+              <span />
+            </span>
           </div>
-
-          <ChatRecommendationCard
-            v-if="message.recommendation"
-            :recommendation="message.recommendation"
-          />
+          <RecommendationCard v-if="message.recommendation" :recommendation="message.recommendation" />
         </div>
       </div>
     </TransitionGroup>
@@ -58,32 +44,27 @@
 </template>
 
 <script setup lang="ts">
-import type { ChatMessage } from '~/types/chat'
+import type { ChatMessage } from '~/types/recommendation'
 
 const props = defineProps<{
   messages: ChatMessage[]
 }>()
 
-const viewport = ref<HTMLDivElement | null>(null)
+const viewport = ref<HTMLElement | null>(null)
 
 function scrollToBottom() {
   const element = viewport.value
-  if (!element) {
-    return
+  if (element) {
+    element.scrollTo({ top: element.scrollHeight, behavior: 'smooth' })
   }
-
-  element.scrollTo({
-    top: element.scrollHeight,
-    behavior: 'smooth'
-  })
 }
 
 watch(
-  () => props.messages.map(message => `${message.id}:${message.content}:${message.isStreaming ? '1' : '0'}:${message.recommendation?.name ?? ''}`).join('|'),
+  () => props.messages.map((message) => `${message.id}:${message.content}:${message.isStreaming ? '1' : '0'}:${message.recommendation?.name ?? ''}`).join('|'),
   async () => {
     await nextTick()
     scrollToBottom()
-  }
+  },
 )
 
 onMounted(scrollToBottom)
@@ -91,13 +72,13 @@ onMounted(scrollToBottom)
 
 <style scoped>
 .message-viewport {
-  border-right: 1px solid rgba(255, 255, 255, 0.28);
   background:
     linear-gradient(180deg, rgba(255, 252, 248, 0.64), rgba(255, 255, 255, 0.14)),
     radial-gradient(circle at top left, rgba(255, 240, 222, 0.18), transparent 22%);
-  scrollbar-width: thin;
+  border-right: 1px solid rgba(255, 255, 255, 0.28);
   scrollbar-color: rgba(148, 163, 184, 0.55) transparent;
   scrollbar-gutter: stable;
+  scrollbar-width: thin;
 }
 
 .message-viewport::-webkit-scrollbar {
@@ -109,10 +90,10 @@ onMounted(scrollToBottom)
 }
 
 .message-viewport::-webkit-scrollbar-thumb {
-  border: 1px solid transparent;
-  border-radius: 9999px;
   background-clip: padding-box;
   background-color: rgba(148, 163, 184, 0.42);
+  border: 1px solid transparent;
+  border-radius: 9999px;
 }
 
 .message-viewport::-webkit-scrollbar-thumb:hover {
@@ -120,42 +101,40 @@ onMounted(scrollToBottom)
 }
 
 .message-bubble {
-  position: relative;
   overflow: hidden;
+  position: relative;
 }
 
 .assistant-bubble {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(251, 246, 239, 0.74));
   border: 1px solid rgba(255, 255, 255, 0.52);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(251, 246, 238, 0.74));
 }
 
 .user-bubble {
+  background: linear-gradient(180deg, rgba(234, 250, 241, 0.96), rgba(219, 243, 231, 0.88));
   border: 1px solid rgba(206, 235, 222, 0.92);
-  background:
-    linear-gradient(180deg, rgba(234, 250, 241, 0.96), rgba(219, 243, 231, 0.88));
 }
 
 .ai-avatar {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(241, 251, 245, 0.82));
   border: 1px solid rgba(255, 255, 255, 0.74);
   border-radius: 9999px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(241, 251, 245, 0.82));
   box-shadow: 0 10px 26px rgba(148, 163, 184, 0.14);
 }
 
 .user-avatar {
+  background: linear-gradient(180deg, rgba(232, 250, 240, 0.98), rgba(214, 241, 228, 0.92));
   border: 1px solid rgba(208, 235, 223, 0.92);
   border-radius: 9999px;
-  background: linear-gradient(180deg, rgba(232, 250, 240, 0.98), rgba(214, 241, 228, 0.92));
   box-shadow: 0 10px 26px rgba(148, 163, 184, 0.14);
 }
 
 .avatar-icon {
-  width: 18px;
   height: 18px;
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 1.8;
+  width: 18px;
 }
 
 .avatar-icon-ai {
@@ -167,18 +146,18 @@ onMounted(scrollToBottom)
 }
 
 .streaming-dots {
+  align-items: center;
   display: inline-flex;
   gap: 0.3rem;
-  align-items: center;
   min-height: 1.5rem;
 }
 
 .streaming-dots span {
-  width: 0.42rem;
-  height: 0.42rem;
-  border-radius: 9999px;
-  background: rgba(15, 23, 42, 0.45);
   animation: pulse 1s ease-in-out infinite;
+  background: rgba(15, 23, 42, 0.45);
+  border-radius: 9999px;
+  height: 0.42rem;
+  width: 0.42rem;
 }
 
 .streaming-dots span:nth-child(2) {

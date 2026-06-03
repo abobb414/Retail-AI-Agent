@@ -9,13 +9,10 @@
             <span class="wordmark-agent">Agent</span>
           </p>
         </div>
-
         <div class="flex flex-wrap items-center gap-2">
           <span
             class="status-pill rounded-full border px-4 py-2 text-sm font-medium"
-            :class="demoMode
-              ? 'border-amber-200/80 bg-amber-50/80 text-amber-700'
-              : 'border-emerald-200/80 bg-emerald-50/76 text-emerald-700'"
+            :class="demoMode ? 'border-amber-200/80 bg-amber-50/80 text-amber-700' : 'border-emerald-200/80 bg-emerald-50/70 text-emerald-700'"
           >
             {{ demoMode ? '本地演示模式' : '模型在线模式' }}
           </span>
@@ -23,20 +20,13 @@
       </header>
 
       <div class="grid min-h-0 flex-1 overflow-hidden lg:grid-cols-[minmax(0,1.22fr)_minmax(280px,0.78fr)]">
-        <ChatMessageList :messages="messages" />
-        <ChatStatusPanel
-          :active-recommendation="activeRecommendation"
-          :profile-summary="profileSummary"
-        />
+        <MessageList :messages="messages" />
+        <StatusPanel :active-recommendation="activeRecommendation" :profile-summary="profileSummary" />
       </div>
 
       <footer class="shell-footer px-4 py-5 sm:px-6 sm:py-6">
         <div class="mx-auto w-full max-w-4xl">
-          <ChatInputBar
-            v-model="draft"
-            :disabled="isStreaming"
-            @submit="sendMessage"
-          />
+          <InputBar v-model="draft" :disabled="isStreaming" @submit="sendMessage" />
         </div>
       </footer>
     </div>
@@ -51,8 +41,8 @@ const {
   isStreaming,
   messages,
   profileSummary,
-  sendMessage
-} = useChatConsultant()
+  sendMessage,
+} = useChat()
 </script>
 
 <style scoped>
@@ -67,65 +57,57 @@ const {
   position: relative;
 }
 
-.chat-shell::before {
-  position: absolute;
-  inset: 0;
+.chat-shell::before,
+.chat-shell::after {
   border-radius: inherit;
+  content: "";
+  pointer-events: none;
+  position: absolute;
+}
+
+.chat-shell::before {
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0.14)),
     linear-gradient(135deg, rgba(236, 248, 241, 0.68), rgba(252, 247, 240, 0.2));
-  content: '';
-  pointer-events: none;
+  inset: 0;
 }
 
 .chat-shell::after {
-  position: absolute;
-  inset: 1px;
-  border-radius: inherit;
   border: 1px solid rgba(255, 255, 255, 0.42);
-  content: '';
-  pointer-events: none;
+  inset: 1px;
+}
+
+.shell-header,
+.shell-footer {
+  position: relative;
 }
 
 .shell-header {
-  position: relative;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.34);
   background: linear-gradient(180deg, rgba(255, 253, 250, 0.42), rgba(255, 255, 255, 0.08));
+  border-bottom: 1px solid rgba(255, 255, 255, 0.34);
 }
 
 .shell-footer {
-  position: relative;
-  border-top: 1px solid rgba(255, 255, 255, 0.34);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 251, 247, 0.26));
+  border-top: 1px solid rgba(255, 255, 255, 0.34);
 }
 
 .brand-lockup {
-  display: flex;
   align-items: center;
+  display: flex;
 }
 
 .wordmark {
-  display: inline-flex;
   align-items: center;
-  gap: 0.55rem;
-  margin: 0;
+  color: #58a57e;
+  display: inline-flex;
   font-size: 1.6rem;
-  font-weight: 700;
   font-style: italic;
-  letter-spacing: 0.12em;
-  color: #58a57e;
-  text-shadow:
-    0 1px 0 rgba(255, 255, 255, 0.78),
-    0 8px 24px rgba(124, 176, 145, 0.16);
-}
-
-.wordmark-retail,
-.wordmark-ai,
-.wordmark-agent {
   font-weight: 700;
-  font-style: italic;
+  gap: 0.55rem;
   letter-spacing: 0.12em;
-  color: #58a57e;
+  margin: 0;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.78), 0 8px 24px rgba(124, 176, 145, 0.16);
 }
 
 .status-pill {
