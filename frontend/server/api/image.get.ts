@@ -1,13 +1,18 @@
-const allowedHosts = new Set([
-  'vitruvi.com',
-  'www.vitruvi.com',
-  'image.benq.com',
-  'media.sonos.com',
-  'ember.com',
-  'www.ember.com',
-  'fellowproducts.com',
-  'www.fellowproducts.com',
-])
+function isBlockedHost(hostname: string) {
+  const normalizedHost = hostname.toLowerCase()
+  return (
+    normalizedHost === 'localhost' ||
+    normalizedHost.endsWith('.localhost') ||
+    normalizedHost === '0.0.0.0' ||
+    normalizedHost.startsWith('127.') ||
+    normalizedHost.startsWith('10.') ||
+    normalizedHost.startsWith('192.168.') ||
+    /^172\.(1[6-9]|2\d|3[0-1])\./.test(normalizedHost) ||
+    normalizedHost === '::1' ||
+    normalizedHost.startsWith('fc') ||
+    normalizedHost.startsWith('fd')
+  )
+}
 
 export default defineEventHandler(async (event) => {
   const rawUrl = getQuery(event).url
@@ -18,8 +23,8 @@ export default defineEventHandler(async (event) => {
   }
 
   const parsedUrl = new URL(imageUrl)
-  if (!allowedHosts.has(parsedUrl.hostname)) {
-    throw createError({ statusCode: 400, statusMessage: 'Image host is not allowed' })
+  if (!['http:', 'https:'].includes(parsedUrl.protocol) || isBlockedHost(parsedUrl.hostname)) {
+    throw createError({ statusCode: 400, statusMessage: 'Image url is not allowed' })
   }
 
   const response = await fetch(parsedUrl, {

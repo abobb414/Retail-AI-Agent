@@ -42,6 +42,7 @@ export default defineEventHandler(async (event) => {
   const selectedProduct = wantsProductRecommendation(latestUserText)
     ? pickProductRecommendation(recommendationContext)
     : null
+  let assistantText = ''
 
   event.node.res.setHeader('Cache-Control', 'no-cache')
   event.node.res.setHeader('Connection', 'keep-alive')
@@ -70,6 +71,12 @@ export default defineEventHandler(async (event) => {
               content: `用户正在要求具体产品推荐。请围绕这一个产品推荐，不要另编商品名：${selectedProduct.name}。
 产品信息：品牌 ${selectedProduct.brand}；类别 ${selectedProduct.category}；价格 ${selectedProduct.price_range}；核心理由：${selectedProduct.consultant_summary} ${selectedProduct.benefit} ${selectedProduct.pairing_note}`,
             }]
+          : wantsProductRecommendation(latestUserText)
+            ? [{
+                role: 'system',
+                content: `用户正在要求具体产品推荐，但本地精选库没有足够贴合的单品。请基于当前对话直接给出一个真实存在的具体产品名称和品牌，不要只追问。
+如果信息不完整，请做合理假设，并在推荐中自然说明假设。回复里必须出现清晰的产品名，方便系统检索官网图片。`,
+              }]
           : []),
         ...(body.messages ?? []).map((message) => ({
           role: message.role,
@@ -117,15 +124,20 @@ export default defineEventHandler(async (event) => {
         const payload = JSON.parse(dataLine)
         const text = payload.choices?.[0]?.delta?.content
         if (text) {
+          assistantText += text
           writeEvent(event, 'chunk', { text })
         }
       }
     }
   }
 
-  if (selectedProduct) {
+  const liveProduct = selectedProduct
+    ? null
+    : await discoverLiveProductRecommendation(assistantText, recommendationContext)
+
+  if (selectedProduct || liveProduct) {
     writeEvent(event, 'product', {
-      product: selectedProduct,
+      product: selectedProduct ?? liveProduct,
     })
   }
 
