@@ -40,7 +40,7 @@ export default defineEventHandler(async (event) => {
   const latestUserText = getLatestUserText(messages)
   const recommendationContext = getRecentUserContext(messages)
   const selectedProduct = wantsProductRecommendation(latestUserText)
-    ? pickProductRecommendation(recommendationContext)
+    ? pickProductRecommendation(latestUserText)
     : null
   let assistantText = ''
 
@@ -133,7 +133,7 @@ export default defineEventHandler(async (event) => {
 
   const liveProduct = selectedProduct
     ? null
-    : await discoverLiveProductRecommendation(assistantText, recommendationContext)
+    : await discoverLiveProductRecommendation(assistantText, latestUserText)
 
   if (selectedProduct || liveProduct) {
     writeEvent(event, 'product', {

@@ -138,12 +138,12 @@ export function wantsProductRecommendation(text: string) {
   return /推荐|产品|商品|具体|买|购入|单品|给我一个|给我推荐|直接/.test(text)
 }
 
-function asksForFurnitureTable(text: string) {
-  return /书桌|办公桌|电脑桌|写字桌|桌子|木桌|实木桌/.test(text)
+function asksForFurnitureOutsideLocalCatalog(text: string) {
+  return /书桌|办公桌|电脑桌|写字桌|桌子|木桌|实木桌|椅子|单人椅|餐椅|靠背椅|休闲椅|扶手椅|凳子|座椅|chair/i.test(text)
 }
 
 export function pickProductRecommendation(text: string) {
-  if (asksForFurnitureTable(text)) {
+  if (asksForFurnitureOutsideLocalCatalog(text)) {
     return null
   }
 
