@@ -125,8 +125,8 @@ function scoreProduct(product: CatalogProduct, text: string) {
     }
   }
 
-  if (/安静|睡眠|睡前|放松|卧室|香|氛围|柔和/.test(text) && product.name.includes('Vitruvi')) score += 26
-  if (/阅读|书房|桌面|台灯|光|工作|办公/.test(text) && product.name.includes('BenQ')) score += 20
+  if (/睡眠|睡前|卧室|玄关|香|香氛|扩香|气味|味道/.test(text) && product.name.includes('Vitruvi')) score += 22
+  if (/阅读|书房|桌面|台灯|灯光|光线|护眼|工作|办公/.test(text) && product.name.includes('BenQ')) score += 28
   if (/音乐|音响|客厅|影院|电视|沉浸/.test(text) && product.name.includes('Sonos')) score += 22
   if (/噪音|隔音|吵|白噪音/.test(text) && product.name.includes('Sonos')) score += 8
   if (/咖啡|茶|杯|温度|保温|办公室/.test(text) && product.name.includes('Ember')) score += 20

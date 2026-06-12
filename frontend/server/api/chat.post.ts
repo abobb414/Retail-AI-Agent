@@ -12,6 +12,21 @@ const systemPrompt = `你是 Retail AI Agent，一位温和、专业、有审美
 如果用户信息还不够，请先问一个最关键的问题。回复使用中文，语气简洁、有质感。
 不要使用 Markdown 加粗、标题符号或星号格式；用自然段落表达。`
 
+function getLatestUserText(messages: IncomingMessage[]) {
+  return [...messages]
+    .reverse()
+    .find((message) => message.role === 'user')
+    ?.content ?? ''
+}
+
+function getRecentUserContext(messages: IncomingMessage[]) {
+  return messages
+    .filter((message) => message.role === 'user')
+    .slice(-4)
+    .map((message) => message.content)
+    .join('\n')
+}
+
 function writeEvent(event: H3Event, name: string, data: unknown) {
   event.node.res.write(`event: ${name}\n`)
   event.node.res.write(`data: ${JSON.stringify(data)}\n\n`)
@@ -21,12 +36,11 @@ export default defineEventHandler(async (event) => {
   const config = useRuntimeConfig()
   const body = await readBody<ChatRequest>(event)
   const apiKey = config.deepseekApiKey
-  const latestUserText = [...(body.messages ?? [])]
-    .reverse()
-    .find((message) => message.role === 'user')
-    ?.content ?? ''
+  const messages = body.messages ?? []
+  const latestUserText = getLatestUserText(messages)
+  const recommendationContext = getRecentUserContext(messages)
   const selectedProduct = wantsProductRecommendation(latestUserText)
-    ? pickProductRecommendation(latestUserText)
+    ? pickProductRecommendation(recommendationContext)
     : null
 
   event.node.res.setHeader('Cache-Control', 'no-cache')
