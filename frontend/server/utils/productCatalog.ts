@@ -139,7 +139,19 @@ export function wantsProductRecommendation(text: string) {
 }
 
 export function pickProductRecommendation(text: string) {
-  const product = [...products].sort((a, b) => scoreProduct(b, text) - scoreProduct(a, text))[0]
+  const scoredProducts = products
+    .map((product) => ({
+      product,
+      score: scoreProduct(product, text),
+    }))
+    .sort((a, b) => b.score - a.score)
+
+  const bestMatch = scoredProducts[0]
+  if (!bestMatch || bestMatch.score < 8) {
+    return null
+  }
+
+  const { product } = bestMatch
 
   return {
     ...product,

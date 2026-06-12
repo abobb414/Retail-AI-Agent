@@ -21,14 +21,13 @@ export default defineEventHandler(async (event) => {
   const config = useRuntimeConfig()
   const body = await readBody<ChatRequest>(event)
   const apiKey = config.deepseekApiKey
-  const userText = (body.messages ?? [])
-    .filter((message) => message.role === 'user')
-    .map((message) => message.content)
-    .join('\n')
-  const selectedProduct = wantsProductRecommendation(userText)
-    ? pickProductRecommendation(userText)
+  const latestUserText = [...(body.messages ?? [])]
+    .reverse()
+    .find((message) => message.role === 'user')
+    ?.content ?? ''
+  const selectedProduct = wantsProductRecommendation(latestUserText)
+    ? pickProductRecommendation(latestUserText)
     : null
-  let assistantText = ''
 
   event.node.res.setHeader('Cache-Control', 'no-cache')
   event.node.res.setHeader('Connection', 'keep-alive')
@@ -104,16 +103,15 @@ export default defineEventHandler(async (event) => {
         const payload = JSON.parse(dataLine)
         const text = payload.choices?.[0]?.delta?.content
         if (text) {
-          assistantText += text
           writeEvent(event, 'chunk', { text })
         }
       }
     }
   }
 
-  if (selectedProduct || wantsProductRecommendation(`${userText}\n${assistantText}`)) {
+  if (selectedProduct) {
     writeEvent(event, 'product', {
-      product: selectedProduct ?? pickProductRecommendation(`${userText}\n${assistantText}`),
+      product: selectedProduct,
     })
   }
 
