@@ -31,7 +31,7 @@
               v-for="prompt in quickPrompts"
               :key="prompt"
               type="button"
-              class="quick-prompt rounded-full border border-white/70 bg-white/72 px-4 py-2 text-sm font-medium text-slate-700 shadow-[0_12px_28px_rgba(130,145,160,0.12)] transition hover:-translate-y-0.5 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+              class="quick-prompt rounded-full border border-white/70 bg-white/65 px-4 py-2 text-sm font-medium text-slate-500 shadow-[0_12px_28px_rgba(130,145,160,0.10)] transition hover:-translate-y-0.5 hover:bg-white/82 hover:text-slate-600 disabled:cursor-not-allowed disabled:opacity-50"
               :disabled="isStreaming"
               @click="sendMessage(prompt)"
             >

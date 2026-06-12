@@ -1,6 +1,7 @@
 <template>
   <div class="input-shell flex items-center gap-3 rounded-full px-5 py-3 shadow-[0_18px_38px_rgba(148,163,184,0.12)]">
     <input
+      ref="inputElement"
       :value="modelValue"
       type="text"
       class="flex-1 border-0 bg-transparent text-[15px] font-normal text-slate-700 outline-none placeholder:text-slate-400 disabled:cursor-not-allowed"
@@ -25,7 +26,7 @@
 </template>
 
 <script setup lang="ts">
-defineProps<{
+const props = defineProps<{
   disabled?: boolean
   modelValue: string
 }>()
@@ -38,6 +39,22 @@ const emit = defineEmits<{
 function updateValue(event: Event) {
   emit('update:modelValue', (event.target as HTMLInputElement).value)
 }
+
+const inputElement = ref<HTMLInputElement | null>(null)
+
+function focusInput() {
+  requestAnimationFrame(() => {
+    inputElement.value?.focus()
+  })
+}
+
+watch(() => props.disabled, (disabled) => {
+  if (!disabled) {
+    focusInput()
+  }
+})
+
+onMounted(focusInput)
 </script>
 
 <style scoped>
