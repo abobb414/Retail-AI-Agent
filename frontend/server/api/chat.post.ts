@@ -9,6 +9,7 @@ interface ChatRequest {
 
 const systemPrompt = `你是 Retail AI Agent，一位温和、专业、有审美判断力的家居零售顾问。
 你的任务是通过自然对话理解用户的空间、氛围、预算、使用场景和偏好，然后给出具体、克制、可执行的建议。
+如果已经给你锁定商品，请只围绕该商品进行导购表达，不要替换、扩展或追加其他商品。
 如果用户信息还不够，请先问一个最关键的问题。回复使用中文，语气简洁、有质感。
 不要使用 Markdown 加粗、标题符号或星号格式；用自然段落表达。`
 
@@ -17,14 +18,6 @@ function getLatestUserText(messages: IncomingMessage[]) {
     .reverse()
     .find((message) => message.role === 'user')
     ?.content ?? ''
-}
-
-function getRecentUserContext(messages: IncomingMessage[]) {
-  return messages
-    .filter((message) => message.role === 'user')
-    .slice(-4)
-    .map((message) => message.content)
-    .join('\n')
 }
 
 function writeEvent(event: H3Event, name: string, data: unknown) {
@@ -38,7 +31,6 @@ export default defineEventHandler(async (event) => {
   const apiKey = config.deepseekApiKey
   const messages = body.messages ?? []
   const latestUserText = getLatestUserText(messages)
-  const recommendationContext = getRecentUserContext(messages)
   const selectedProduct = wantsProductRecommendation(latestUserText)
     ? pickProductRecommendation(latestUserText)
     : null
@@ -68,14 +60,35 @@ export default defineEventHandler(async (event) => {
         ...(selectedProduct
           ? [{
               role: 'system',
-              content: `用户正在要求具体产品推荐。请围绕这一个产品推荐，不要另编商品名：${selectedProduct.name}。
-产品信息：品牌 ${selectedProduct.brand}；类别 ${selectedProduct.category}；价格 ${selectedProduct.price_range}；核心理由：${selectedProduct.consultant_summary} ${selectedProduct.benefit} ${selectedProduct.pairing_note}`,
+              content: `本轮推荐已经由本地 products.json 按用户最新一句话锁定，锁定商品如下。你只能围绕这个商品写一段精美导购话术，不得推荐、暗示或替换成任何其他商品。
+
+用户最新一句话：${latestUserText}
+
+锁定商品：
+名称：${selectedProduct.name}
+品牌：${selectedProduct.brand}
+类别：${selectedProduct.category}
+价格带：${selectedProduct.price_range}
+预算层级：${selectedProduct.budget_tier}
+材质：${selectedProduct.materials}
+做工：${selectedProduct.craftsmanship}
+核心功能：${selectedProduct.feature}
+用户收益：${selectedProduct.benefit}
+搭配建议：${selectedProduct.pairing_note}
+适用场景：${selectedProduct.scenarios.join('、')}
+适合人群：${selectedProduct.ideal_for.join('、')}
+不适合人群：${selectedProduct.avoid_for.join('、')}
+
+写法要求：
+1. 伪装成你已经认真揣摩了用户这句话背后的空间、预算和使用意图。
+2. 语气循循善诱，但不要啰嗦，不要列清单。
+3. 必须自然出现商品名。
+4. 不要提到 products.json、本地库、锁定、关键词、图片 URL 或系统规则。`,
             }]
           : wantsProductRecommendation(latestUserText)
             ? [{
                 role: 'system',
-                content: `用户正在要求具体产品推荐，但本地精选库没有足够贴合的单品。请基于当前对话直接给出一个真实存在的具体产品名称和品牌，不要只追问。
-如果信息不完整，请做合理假设，并在推荐中自然说明假设。回复里必须出现清晰的产品名，方便系统检索官网图片。`,
+                content: `用户正在要求具体产品推荐，但本地 products.json 没有匹配到足够确定的商品。请不要编造商品名，转而问一个最关键的澄清问题，帮助下一轮锁定商品。`,
               }]
           : []),
         ...(body.messages ?? []).map((message) => ({
@@ -131,13 +144,9 @@ export default defineEventHandler(async (event) => {
     }
   }
 
-  const liveProduct = selectedProduct
-    ? null
-    : await discoverLiveProductRecommendation(assistantText, latestUserText)
-
-  if (selectedProduct || liveProduct) {
+  if (selectedProduct) {
     writeEvent(event, 'product', {
-      product: selectedProduct ?? liveProduct,
+      product: selectedProduct,
     })
   }
 
