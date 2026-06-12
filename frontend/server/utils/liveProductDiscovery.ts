@@ -210,6 +210,10 @@ function directCandidateUrls(query: string) {
   const normalizedQuery = query.toLowerCase()
   const urls: string[] = []
 
+  if (/bekant|贝肯特/.test(normalizedQuery)) {
+    urls.push('https://www.ikea.com/us/en/p/bekant-desk-white-s19022808/')
+  }
+
   if (/micke|米克|宜家|ikea/.test(normalizedQuery)) {
     urls.push('https://www.ikea.com/us/en/p/micke-desk-white-80213074/')
   }

@@ -126,7 +126,7 @@ function scoreProduct(product: CatalogProduct, text: string) {
   }
 
   if (/睡眠|睡前|卧室|玄关|香|香氛|扩香|气味|味道/.test(text) && product.name.includes('Vitruvi')) score += 22
-  if (/阅读|书房|桌面|台灯|灯光|光线|护眼|工作|办公/.test(text) && product.name.includes('BenQ')) score += 28
+  if (/阅读|书房|台灯|灯光|光线|护眼|照明/.test(text) && product.name.includes('BenQ')) score += 28
   if (/音乐|音响|客厅|影院|电视|沉浸/.test(text) && product.name.includes('Sonos')) score += 22
   if (/噪音|隔音|吵|白噪音/.test(text) && product.name.includes('Sonos')) score += 8
   if (/咖啡|茶|杯|温度|保温|办公室/.test(text) && product.name.includes('Ember')) score += 20
@@ -138,7 +138,15 @@ export function wantsProductRecommendation(text: string) {
   return /推荐|产品|商品|具体|买|购入|单品|给我一个|给我推荐|直接/.test(text)
 }
 
+function asksForFurnitureTable(text: string) {
+  return /书桌|办公桌|电脑桌|写字桌|桌子|木桌|实木桌/.test(text)
+}
+
 export function pickProductRecommendation(text: string) {
+  if (asksForFurnitureTable(text)) {
+    return null
+  }
+
   const scoredProducts = products
     .map((product) => ({
       product,
