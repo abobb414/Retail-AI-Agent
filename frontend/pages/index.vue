@@ -26,6 +26,18 @@
 
       <footer class="shell-footer px-4 py-5 sm:px-6 sm:py-6">
         <div class="mx-auto w-full max-w-4xl">
+          <div v-if="messages.length === 1" class="mb-3 flex flex-wrap gap-2">
+            <button
+              v-for="prompt in quickPrompts"
+              :key="prompt"
+              type="button"
+              class="quick-prompt rounded-full border border-white/70 bg-white/72 px-4 py-2 text-sm font-medium text-slate-700 shadow-[0_12px_28px_rgba(130,145,160,0.12)] transition hover:-translate-y-0.5 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+              :disabled="isStreaming"
+              @click="sendMessage(prompt)"
+            >
+              {{ prompt }}
+            </button>
+          </div>
           <InputBar v-model="draft" :disabled="isStreaming" @submit="sendMessage" />
         </div>
       </footer>
@@ -41,6 +53,7 @@ const {
   isStreaming,
   messages,
   profileSummary,
+  quickPrompts,
   sendMessage,
 } = useChat()
 </script>
@@ -112,5 +125,9 @@ const {
 
 .status-pill {
   box-shadow: 0 16px 32px rgba(155, 170, 188, 0.12);
+}
+
+.quick-prompt {
+  backdrop-filter: blur(18px);
 }
 </style>

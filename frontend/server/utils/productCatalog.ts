@@ -99,7 +99,7 @@ function getMatchedPreferences(product: CatalogProduct, userText: string) {
 }
 
 export function wantsProductRecommendation(text: string) {
-  return /推荐|产品|商品|具体|买|购入|单品|给我一个|给我推荐|直接|想要|需要|适合|找|选/.test(text)
+  return /推荐|产品|商品|具体|买|购入|单品|给我一个|给我推荐|直接|想要|需要|适合|找|选|改变|治愈|疲惫|好累|幸福感|一团糟|整理|收纳|理一下|新工作|加班/.test(text)
 }
 
 export function pickProductRecommendation(text: string) {

@@ -1,6 +1,11 @@
 import type { ChatMessage, Recommendation } from '~/types/recommendation'
 
-const welcomeMessage = '欢迎来到 Retail AI Agent。先从空间开始吧。你希望我围绕卧室、客厅、书房，还是某个更具体的角落来为你判断？'
+const welcomeMessage = '欢迎来到灵感买手店。你现在最想改变你家里的哪个角落？或者是想治愈一下疲惫的自己？'
+const quickPrompts = ['我的桌面一团糟', '想要提升卧室幸福感', '今晚加班好累']
+const clientDirective = `Stage 0: 用户不是在搜索商品，而是在丢出一个生活状态。
+Stage 1: 先从这句话里读出空间、情绪、使用阻力和隐含预算。
+Stage 2: 后端必须先用本地 products.json 锁定一个商品，不允许模型自由换货。
+Stage 3: 模型只负责把锁定商品包装成像深聊之后得出的导购建议，语气要有同理心、循循善诱、精美但不浮夸。`
 
 function splitServerEvents(buffer: string) {
   const parts = buffer.split('\n\n')
@@ -72,8 +77,8 @@ export function useChat() {
     },
   ])
 
-  async function sendMessage() {
-    const userText = draft.value.trim()
+  async function sendMessage(overrideText?: string) {
+    const userText = (overrideText ?? draft.value).trim()
     if (!userText || isStreaming.value) {
       return
     }
@@ -105,7 +110,7 @@ export function useChat() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ messages: requestMessages }),
+        body: JSON.stringify({ messages: requestMessages, clientDirective }),
       })
 
       if (!response.ok) {
@@ -176,6 +181,7 @@ export function useChat() {
     isStreaming,
     messages,
     profileSummary,
+    quickPrompts,
     sendMessage,
   }
 }

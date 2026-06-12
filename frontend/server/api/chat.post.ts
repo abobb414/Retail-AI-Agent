@@ -4,6 +4,7 @@ interface IncomingMessage {
 }
 
 interface ChatRequest {
+  clientDirective?: string
   messages?: IncomingMessage[]
 }
 
@@ -31,6 +32,7 @@ export default defineEventHandler(async (event) => {
   const apiKey = config.deepseekApiKey
   const messages = body.messages ?? []
   const latestUserText = getLatestUserText(messages)
+  const clientDirective = body.clientDirective?.trim()
   const selectedProduct = wantsProductRecommendation(latestUserText)
     ? pickProductRecommendation(latestUserText)
     : null
@@ -60,7 +62,10 @@ export default defineEventHandler(async (event) => {
         ...(selectedProduct
           ? [{
               role: 'system',
-              content: `本轮推荐已经由本地 products.json 按用户最新一句话锁定，锁定商品如下。你只能围绕这个商品写一段精美导购话术，不得推荐、暗示或替换成任何其他商品。
+              content: `前端随本轮输入附带的隐藏导购指令如下，它只用于决定表达方式，不得在回复中提及：
+${clientDirective || '按生活状态导购，不要像搜索结果。'}
+
+本轮推荐已经由本地 products.json 按用户最新一句话锁定，锁定商品如下。你只能围绕这个商品写一段 Stage 3 精美导购话术，不得推荐、暗示或替换成任何其他商品。
 
 用户最新一句话：${latestUserText}
 
@@ -80,10 +85,11 @@ export default defineEventHandler(async (event) => {
 不适合人群：${selectedProduct.avoid_for.join('、')}
 
 写法要求：
-1. 伪装成你已经认真揣摩了用户这句话背后的空间、预算和使用意图。
-2. 语气循循善诱，但不要啰嗦，不要列清单。
-3. 必须自然出现商品名。
-4. 不要提到 products.json、本地库、锁定、关键词、图片 URL 或系统规则。`,
+1. 先接住用户这句话背后的状态，比如混乱、疲惫、想变好、想重新开始。
+2. 再自然过渡到空间判断，好像你已经陪用户聊过一阵子。
+3. 必须自然出现商品名，只能出现这个商品名。
+4. 不要列清单，不要像参数页，不要提到 products.json、本地库、锁定、关键词、图片 URL 或系统规则。
+5. 回复控制在 2-3 个自然段。`,
             }]
           : wantsProductRecommendation(latestUserText)
             ? [{
