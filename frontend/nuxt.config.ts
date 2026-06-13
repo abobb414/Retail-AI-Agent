@@ -18,7 +18,7 @@ export default defineNuxtConfig({
         { name: 'description', content: 'Retail AI Agent starter project with Nuxt 3 and FastAPI.' },
       ],
       link: [
-        { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' },
+        { rel: 'icon', type: 'image/png', href: '/favicon.png' },
       ],
     },
   },
