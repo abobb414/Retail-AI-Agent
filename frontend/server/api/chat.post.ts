@@ -94,7 +94,7 @@ ${clientDirective || '按生活状态导购，不要像搜索结果。'}
           : wantsProductRecommendation(latestUserText)
             ? [{
                 role: 'system',
-                content: `用户正在要求具体产品推荐，但本地 products.json 没有匹配到足够确定的商品。请不要编造商品名，转而问一个最关键的澄清问题，帮助下一轮锁定商品。`,
+                content: `用户这句话太泛，还不能锁定唯一商品。请不要推荐商品，不要编造商品名，只问一个温柔但具体的澄清问题，帮助判断使用场景、空间或想解决的状态。不要提到本地库、products.json、关键词或系统规则。`,
               }]
           : []),
         ...(body.messages ?? []).map((message) => ({

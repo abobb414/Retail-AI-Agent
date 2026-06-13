@@ -74,7 +74,13 @@ const props = defineProps<{
   recommendation: Recommendation
 }>()
 
-const proxiedImage = computed(() => `/api/image?url=${encodeURIComponent(props.recommendation.image)}`)
+const proxiedImage = computed(() => {
+  if (props.recommendation.image.startsWith('/')) {
+    return props.recommendation.image
+  }
+
+  return `/api/image?url=${encodeURIComponent(props.recommendation.image)}`
+})
 </script>
 
 <style scoped>

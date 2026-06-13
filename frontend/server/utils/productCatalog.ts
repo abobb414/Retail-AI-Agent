@@ -98,11 +98,26 @@ function getMatchedPreferences(product: CatalogProduct, userText: string) {
   return matches.length ? matches : product.scenarios.slice(0, 3)
 }
 
+function isGenericProductOnlyAsk(text: string) {
+  const compactText = text.replace(/\s+/g, '')
+  const hasContext = /桌面|一团糟|收纳|整理|理一下|新工作|加班|好累|疲惫|治愈|幸福感|卧室|书房|客厅|餐厅|玄关|厨房|办公室|办公|工作|久坐|睡前|放松|浅木|原木|实木|橡木|白橡木|预算|小户型|日式|电脑|显示器|床头|氛围|早餐|通勤|阅读|学习/.test(text)
+
+  if (hasContext) {
+    return false
+  }
+
+  return /^(我)?(想要|需要|要|想买|买|推荐|给我推荐|给我|找|选)?(一个|一把|一张|一款|个|把|张|款)?(椅子|座椅|凳子|桌子|书桌|办公桌|台灯|灯|香薰机|香薰|收纳盒)$/.test(compactText)
+}
+
 export function wantsProductRecommendation(text: string) {
   return /推荐|产品|商品|具体|买|购入|单品|给我一个|给我推荐|直接|想要|需要|适合|找|选|改变|治愈|疲惫|好累|幸福感|一团糟|整理|收纳|理一下|新工作|加班/.test(text)
 }
 
 export function pickProductRecommendation(text: string) {
+  if (isGenericProductOnlyAsk(text)) {
+    return null
+  }
+
   const scoredProducts = products
     .map((product) => ({
       product,
