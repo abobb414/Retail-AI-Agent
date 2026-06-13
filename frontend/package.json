@@ -4,20 +4,14 @@
   "private": true,
   "scripts": {
     "dev": "nuxt dev",
-    "dev:node24": "npx -y -p node@24 node ./node_modules/nuxt/bin/nuxt.mjs dev --host 127.0.0.1 --port 3000",
     "build": "nuxt build",
-    "build:node24": "npx -y -p node@24 node ./node_modules/nuxt/bin/nuxt.mjs build",
     "generate": "nuxt generate",
     "preview": "nuxt preview",
-    "start:local": "set -a; . ./.env; set +a; HOST=127.0.0.1 PORT=3000 node .output/server/index.mjs",
-    "preview:node24": "npx -y -p node@24 node .output/server/index.mjs"
+    "start:local": "set -a; [ -f ../.env ] && . ../.env; [ -f ./.env ] && . ./.env; export NUXT_DEEPSEEK_API_KEY=${NUXT_DEEPSEEK_API_KEY:-$DEEPSEEK_API_KEY}; export NUXT_DEEPSEEK_BASE_URL=${NUXT_DEEPSEEK_BASE_URL:-$DEEPSEEK_BASE_URL}; export NUXT_DEEPSEEK_MODEL=${NUXT_DEEPSEEK_MODEL:-$DEEPSEEK_MODEL}; set +a; HOST=127.0.0.1 PORT=3000 node .output/server/index.mjs"
   },
   "dependencies": {
     "@nuxtjs/tailwindcss": "^6.14.0",
     "nuxt": "^3.17.5",
     "vue": "^3.5.16"
-  },
-  "devDependencies": {
-    "playwright": "^1.60.0"
   }
 }

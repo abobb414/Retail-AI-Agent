@@ -16,3 +16,7 @@ backend/**/*.pyc
 !frontend/.env.example
 
 frontend/.run/
+.vercel/
+.vercel-local-page.png
+.vercel-product-card.png
+.vercel-deployed-product-card.png
