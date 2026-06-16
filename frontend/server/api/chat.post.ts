@@ -35,6 +35,15 @@ function writeEvent(event: H3Event, name: string, data: unknown) {
   event.node.res.write(`data: ${JSON.stringify(data)}\n\n`)
 }
 
+function getNoProductMessage(text: string) {
+  const compactText = text.replace(/\s+/g, '')
+  if (/小米|米家|xiaomi|redmi|红米/.test(compactText) && /灯|台灯|照明|lamp|light/.test(compactText)) {
+    return '我这边暂时没有能和这个灯具需求对应的小米商品卡，所以先不硬推荐。你可以换成「小米电视/空调/冰箱/耳机」这类库里有清晰商品图和详情的品类，或者继续看宜家/MUJI 的灯具方向。'
+  }
+
+  return '这次我没有在商品库里锁到足够可靠的具体商品，所以先不硬推。你可以补一句品牌、预算、性别/尺码或更具体的品类，我再给你一张能展示商品图和官网链接的卡片。'
+}
+
 export default defineEventHandler(async (event) => {
   const config = useRuntimeConfig()
   const body = await readBody<ChatRequest>(event)
@@ -56,6 +65,18 @@ export default defineEventHandler(async (event) => {
   if (!apiKey) {
     event.node.res.statusCode = 500
     writeEvent(event, 'error', { message: 'DeepSeek API Key 未配置。' })
+    event.node.res.end()
+    return
+  }
+
+  if (hasRecommendationIntent && !selectedProduct) {
+    writeEvent(event, 'chunk', { text: getNoProductMessage(recommendationContext) })
+    writeEvent(event, 'meta', {
+      mode: 'deepseek',
+      stage: 'no_catalog_match',
+      profile_summary: [],
+    })
+    writeEvent(event, 'done', { source: 'catalog_guard' })
     event.node.res.end()
     return
   }

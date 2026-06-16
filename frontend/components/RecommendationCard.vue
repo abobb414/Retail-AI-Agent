@@ -1,13 +1,24 @@
 <template>
   <div class="recommend-card overflow-hidden rounded-[24px] border border-white/50 shadow-[0_18px_46px_rgba(87,94,119,0.18)]">
     <div class="recommend-cover relative h-56 overflow-hidden sm:h-64">
-      <img :src="proxiedImage" :alt="recommendation.name" class="h-full w-full object-cover" loading="lazy">
-      <div class="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-slate-900/30 to-transparent" />
+      <img
+        v-if="showImage"
+        :src="proxiedImage"
+        :alt="recommendation.name"
+        class="h-full w-full object-cover"
+        loading="lazy"
+        @error="imageFailed = true"
+      >
+      <div v-else class="flex h-full w-full flex-col justify-end bg-[linear-gradient(135deg,#dceee8,#e7f0f7)] p-6">
+        <p class="text-[11px] uppercase tracking-[0.22em] text-slate-500">暂无可用商品图</p>
+        <p class="mt-2 max-w-md text-lg font-semibold leading-snug text-slate-700">{{ recommendation.name }}</p>
+      </div>
+      <div v-if="showImage" class="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-slate-900/30 to-transparent" />
       <div class="absolute left-5 top-5 flex flex-wrap gap-2">
         <span class="rounded-full bg-white/80 px-3 py-1 text-[11px] font-medium text-slate-700">{{ recommendation.category }}</span>
         <span class="rounded-full bg-black/20 px-3 py-1 text-[11px] font-medium text-white backdrop-blur">{{ recommendation.brand }}</span>
       </div>
-      <div class="absolute bottom-5 left-5 right-5">
+      <div v-if="showImage" class="absolute bottom-5 left-5 right-5">
         <p class="text-[11px] uppercase tracking-[0.22em] text-white/70">推荐单品</p>
         <h3 class="mt-2 text-xl font-semibold leading-snug text-white sm:text-2xl">{{ recommendation.name }}</h3>
         <div class="mt-2 flex flex-wrap gap-2 text-sm font-medium text-white/80">
@@ -72,12 +83,24 @@ const props = defineProps<{
   recommendation: Recommendation
 }>()
 
+const imageFailed = ref(false)
+
 const proxiedImage = computed(() => {
+  if (!props.recommendation.image) {
+    return ''
+  }
+
   if (props.recommendation.image.startsWith('/')) {
     return props.recommendation.image
   }
 
   return `/api/image?url=${encodeURIComponent(props.recommendation.image)}`
+})
+
+const showImage = computed(() => Boolean(proxiedImage.value) && !imageFailed.value)
+
+watch(() => props.recommendation.image, () => {
+  imageFailed.value = false
 })
 </script>
 

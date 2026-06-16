@@ -146,6 +146,14 @@ const productIntents: ProductIntent[] = [
     promptTerms: ['帽子', '背包', '手套', '配件', '户外配件', '运动配件'],
   },
   {
+    id: 'lighting',
+    userPattern: /灯|台灯|落地灯|灯泡|照明|lamp|light/,
+    productPattern: /灯|台灯|落地灯|灯泡|照明|lamp|light|lantern/,
+    requireProductPattern: /灯|台灯|落地灯|灯泡|照明|lamp|light|lantern/,
+    excludeProductPattern: /服饰|鞋|裤|t恤|电视|显示器|手环|耳机|手机|平板|电脑/,
+    promptTerms: ['台灯', '灯具', '照明', '灯泡', '阅读灯', '卧室灯'],
+  },
+  {
     id: 'office_chair',
     userPattern: /办公椅|工作椅|电脑椅|人体工学椅|久坐|office chair|desk chair/,
     productPattern: /办公椅|工作椅|电脑椅|转椅|office chair|desk chair|chair/,
@@ -267,9 +275,119 @@ function getMatchedIntents(text: string) {
   return productIntents.filter((intent) => intent.userPattern.test(normalizedText))
 }
 
+function getGenderPreference(text: string) {
+  if (/男的|我是男|男士|男式|男子|男款|男生|男性|men|mens|man/.test(text)) {
+    return 'male'
+  }
+  if (/女的|我是女|女士|女式|女子|女款|女生|女性|women|womens|woman/.test(text)) {
+    return 'female'
+  }
+  return null
+}
+
+function hasOppositeGender(productText: string, preference: 'male' | 'female' | null) {
+  if (preference === 'male') {
+    return /女式|女士|女子|女款|女生|女性|女装|连衣裙|裙装|半身裙|胸衣|内衣|文胸|bra|dress|skirt|women|womens|woman/.test(productText)
+  }
+  if (preference === 'female') {
+    return /男式|男士|男子|男款|男生|男性|men|mens|man/.test(productText)
+  }
+  return false
+}
+
+function hasRequestedBrand(text: string) {
+  const normalizedText = normalizeText(text)
+  return ['uniqlo', '优衣库', 'lululemon', '露露乐蒙', 'muji', '无印良品', 'ikea', '宜家', 'xiaomi', '小米', '米家', 'adidas', '阿迪达斯', 'nike', '耐克']
+    .some((brand) => normalizedText.includes(normalizeText(brand)))
+}
+
+function getRequestedBrandAliases(text: string) {
+  const normalizedText = normalizeText(text)
+  const brandGroups = [
+    ['uniqlo', '优衣库'],
+    ['lululemon', '露露乐蒙'],
+    ['muji', '无印良品'],
+    ['ikea', '宜家'],
+    ['xiaomi', '小米', '米家', 'redmi', '红米'],
+    ['adidas', '阿迪达斯'],
+    ['nike', '耐克'],
+  ]
+
+  return brandGroups.find((group) => group.some((brand) => normalizedText.includes(normalizeText(brand)))) ?? []
+}
+
+function filterByRequestedBrand(products: CatalogProduct[], text: string) {
+  const requestedBrands = getRequestedBrandAliases(text)
+  if (!requestedBrands.length) {
+    return products
+  }
+
+  return products.filter((product) => {
+    const productText = normalizeText([
+      product.brand,
+      product.name,
+      ...getBrandAliases(product.brand),
+      ...product.keywords,
+    ].join(' '))
+    return requestedBrands.some((brand) => productText.includes(normalizeText(brand)))
+  })
+}
+
+function isPoorDisplayImage(product: CatalogProduct) {
+  const image = product.image || ''
+  const brand = normalizeText(product.brand)
+  if (!image) {
+    return true
+  }
+
+  if (brand.includes('uniqlo') && /\/hmall\/test\/.+\/chip\//.test(image)) {
+    return true
+  }
+
+  if (brand.includes('lululemon') && /5113b651e00e0aa139e2348517884e3f75e3b6bb\.png/.test(image)) {
+    return true
+  }
+
+  return false
+}
+
+function getUniqloFallbackImage(product: CatalogProduct) {
+  const text = normalizeText([product.name, product.category, product.materials, ...product.keywords].join(' '))
+  const fallbackIds = text.includes('airism')
+    ? ['475355', '448759', '482295']
+    : text.includes('麻') || text.includes('linen')
+      ? ['474231', '465185']
+      : ['482295', '475355', '465185', '448759']
+  const fallbackId = fallbackIds[stableHash(product.id || product.name) % fallbackIds.length]
+  const fallbackColors: Record<string, string[]> = {
+    '448759': ['00', '09'],
+    '465185': ['00', '67'],
+    '474231': ['00'],
+    '475355': ['00'],
+    '482295': ['00'],
+  }
+  const colors = fallbackColors[fallbackId] ?? ['00']
+  const safeColor = colors[stableHash(product.name) % colors.length]
+
+  return `https://image.uniqlo.com/UQ/ST3/WesternCommon/imagesgoods/${fallbackId}/item/goods_${safeColor}_${fallbackId}_3x4.jpg`
+}
+
+function getDisplayImage(product: CatalogProduct) {
+  if (!isPoorDisplayImage(product)) {
+    return product.image
+  }
+
+  if (normalizeText(product.brand).includes('uniqlo')) {
+    return getUniqloFallbackImage(product)
+  }
+
+  return ''
+}
+
 function scoreIntentFit(product: CatalogProduct, userText: string) {
   const productText = getRawProductText(product)
   const dominantIntent = getDominantIntent(userText)
+  const genderPreference = getGenderPreference(userText)
   let score = 0
 
   for (const intent of getMatchedIntents(userText)) {
@@ -293,6 +411,12 @@ function scoreIntentFit(product: CatalogProduct, userText: string) {
   if (!/儿童|孩子|童|幼儿|大童|小童|婴童|宝宝|baby|infant|toddler|kids/.test(userText) && /儿童|幼儿|婴童|宝宝|大童|小童|男童|女童|童装|baby|infant|toddler|kids/.test(productText)) {
     score -= 160
   }
+  if (hasOppositeGender(productText, genderPreference)) {
+    score -= 260
+  }
+  if (isPoorDisplayImage(product) && !hasRequestedBrand(userText)) {
+    score -= 44
+  }
 
   const budgetMatch = userText.match(/(?:预算|价格|价位)?\s*(\d{2,6})\s*(?:元|块|以内|以下|左右)?/)
   const productPriceMatch = product.price_range.match(/CNY\s*([\d.]+)/i)
@@ -311,6 +435,7 @@ function scoreIntentFit(product: CatalogProduct, userText: string) {
 
 function filterByStrongIntent(products: CatalogProduct[], text: string) {
   const intent = getDominantIntent(text)
+  const genderPreference = getGenderPreference(text)
   if (!intent) {
     return products
   }
@@ -331,6 +456,9 @@ function filterByStrongIntent(products: CatalogProduct[], text: string) {
         return false
       }
       if (!/儿童|孩子|童|幼儿|大童|小童|婴童|宝宝|baby|infant|toddler|kids/.test(text) && /儿童|幼儿|婴童|宝宝|大童|小童|男童|女童|童装|baby|infant|toddler|kids/.test(productText)) {
+        return false
+      }
+      if (hasOppositeGender(productText, genderPreference)) {
         return false
       }
       return true
@@ -497,7 +625,12 @@ export function wantsProductRecommendation(text: string) {
 
 function findBestProduct(products: CatalogProduct[], text: string) {
   const normalizedText = normalizeText(text)
-  const scoredProducts = filterByStrongIntent(products, text)
+  const brandFilteredProducts = filterByRequestedBrand(products, text)
+  if (!brandFilteredProducts.length) {
+    return undefined
+  }
+
+  const scoredProducts = filterByStrongIntent(brandFilteredProducts, text)
     .map((product) => ({
       product,
       score: scoreProduct(product, text),
@@ -539,9 +672,11 @@ export function pickProductRecommendation(text: string) {
   const displayPairing = isCrawledProduct
     ? `先看尺码、颜色、使用场景和官网详情；如果这些都对，再和同品牌相近款放在一起比较。`
     : product.pairing_note
+  const displayImage = getDisplayImage(product)
 
   return {
     ...product,
+    image: displayImage,
     feature: displayFeature,
     benefit: displayBenefit,
     pairing_note: displayPairing,
