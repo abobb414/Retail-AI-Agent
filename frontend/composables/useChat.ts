@@ -1,11 +1,11 @@
 import type { ChatMessage, Recommendation } from '~/types/recommendation'
 
-const welcomeMessage = '欢迎来到灵感买手店。你现在最想改变你家里的哪个角落？或者是想治愈一下疲惫的自己？'
-const quickPrompts = ['我的桌面一团糟', '想要提升卧室幸福感', '今晚加班好累']
-const clientDirective = `Stage 0: 用户不是在搜索商品，而是在丢出一个生活状态。
-Stage 1: 先从这句话里读出空间、情绪、使用阻力和隐含预算。
-Stage 2: 后端必须先用本地 products.json 锁定一个商品，不允许模型自由换货。
-Stage 3: 模型只负责把锁定商品包装成像深聊之后得出的导购建议，语气要有同理心、循循善诱、精美但不浮夸。`
+const welcomeMessage = '欢迎来到灵感买手店。你可以说一个品类，也可以说一个场景；如果信息还不够，我会先问一句再推荐。'
+const quickPrompts = ['给我推荐半袖', '想找一把办公椅', '小卧室想更舒服']
+const clientDirective = `Stage 0: 用户可能是在找一个商品，也可能是在描述一个生活状态。
+Stage 1: 先判断品类、场景、预算、尺码、风格或安装条件是否足够。
+Stage 2: 信息不足时先问一个关键问题；信息足够时后端再从商品库锁定一个商品。
+Stage 3: 模型只负责把锁定商品包装成自然导购建议，语气要专业、克制、有同理心，不要像搜索结果。`
 
 function splitServerEvents(buffer: string) {
   const parts = buffer.split('\n\n')

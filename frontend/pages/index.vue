@@ -1,7 +1,7 @@
 <template>
-  <div class="chat-page flex min-h-screen items-start justify-center px-4 py-6 sm:px-6 lg:py-8">
-    <div class="chat-shell mx-auto flex h-[min(88vh,920px)] w-full max-w-6xl flex-col overflow-hidden rounded-[36px] border border-white/60 bg-white/40 shadow-[0_40px_100px_rgba(131,152,175,0.22)] backdrop-blur-[28px]">
-      <header class="shell-header flex flex-wrap items-center justify-between gap-4 px-6 py-5 sm:px-8">
+  <div class="chat-page flex min-h-[100dvh] items-start justify-center px-0 py-0 sm:px-6 sm:py-6 lg:py-8">
+    <div class="chat-shell mx-auto flex h-[100dvh] w-full max-w-6xl flex-col overflow-hidden bg-white/52 shadow-[0_40px_100px_rgba(86,119,153,0.16)] backdrop-blur-[24px] sm:h-[min(88vh,920px)] sm:rounded-[36px]">
+      <header class="shell-header flex flex-wrap items-center justify-between gap-3 px-5 py-4 sm:px-8 sm:py-5">
         <div class="brand-lockup">
           <p class="wordmark" aria-label="Retail AI Agent">
             <span class="wordmark-retail">Retail</span>
@@ -21,10 +21,10 @@
 
       <div class="grid min-h-0 flex-1 overflow-hidden lg:grid-cols-[minmax(0,1.22fr)_minmax(280px,0.78fr)]">
         <MessageList :messages="messages" />
-        <StatusPanel :active-recommendation="activeRecommendation" :profile-summary="profileSummary" />
+        <StatusPanel class="hidden lg:flex" :active-recommendation="activeRecommendation" :profile-summary="profileSummary" />
       </div>
 
-      <footer class="shell-footer px-4 py-5 sm:px-6 sm:py-6">
+      <footer class="shell-footer px-4 py-4 sm:px-6 sm:py-6">
         <div class="mx-auto w-full max-w-4xl">
           <div v-if="messages.length === 1" class="mb-3 flex flex-wrap gap-2">
             <button
@@ -61,33 +61,13 @@ const {
 <style scoped>
 .chat-page {
   background:
-    radial-gradient(circle at 14% 18%, rgba(173, 236, 202, 0.18), transparent 26%),
-    radial-gradient(circle at 88% 12%, rgba(247, 222, 196, 0.34), transparent 24%),
-    radial-gradient(circle at 76% 80%, rgba(211, 230, 242, 0.28), transparent 22%);
+    radial-gradient(circle at 12% 16%, rgba(154, 232, 199, 0.24), transparent 28%),
+    radial-gradient(circle at 84% 12%, rgba(166, 218, 255, 0.34), transparent 26%),
+    radial-gradient(circle at 72% 82%, rgba(194, 231, 255, 0.32), transparent 24%);
 }
 
 .chat-shell {
   position: relative;
-}
-
-.chat-shell::before,
-.chat-shell::after {
-  border-radius: inherit;
-  content: "";
-  pointer-events: none;
-  position: absolute;
-}
-
-.chat-shell::before {
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0.14)),
-    linear-gradient(135deg, rgba(236, 248, 241, 0.68), rgba(252, 247, 240, 0.2));
-  inset: 0;
-}
-
-.chat-shell::after {
-  border: 1px solid rgba(255, 255, 255, 0.42);
-  inset: 1px;
 }
 
 .shell-header,
@@ -96,13 +76,13 @@ const {
 }
 
 .shell-header {
-  background: linear-gradient(180deg, rgba(255, 253, 250, 0.42), rgba(255, 255, 255, 0.08));
-  border-bottom: 1px solid rgba(255, 255, 255, 0.34);
+  background: transparent;
+  border-bottom: 0;
 }
 
 .shell-footer {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 251, 247, 0.26));
-  border-top: 1px solid rgba(255, 255, 255, 0.34);
+  background: transparent;
+  border-top: 0;
 }
 
 .brand-lockup {
@@ -121,6 +101,19 @@ const {
   letter-spacing: 0.12em;
   margin: 0;
   text-shadow: 0 1px 0 rgba(255, 255, 255, 0.78), 0 8px 24px rgba(124, 176, 145, 0.16);
+}
+
+@media (max-width: 640px) {
+  .wordmark {
+    font-size: 1.18rem;
+    gap: 0.34rem;
+    letter-spacing: 0.08em;
+  }
+
+  .status-pill {
+    font-size: 0.75rem;
+    padding: 0.45rem 0.75rem;
+  }
 }
 
 .status-pill {

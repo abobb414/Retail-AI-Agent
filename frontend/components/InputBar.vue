@@ -5,7 +5,7 @@
       :value="modelValue"
       type="text"
       class="flex-1 border-0 bg-transparent text-[15px] font-normal text-slate-700 outline-none placeholder:text-slate-400 disabled:cursor-not-allowed"
-      placeholder="比如：我希望卧室更安静柔和，适合睡前放松"
+      placeholder="比如：夏天通勤穿的半袖，预算 300 以内"
       :disabled="disabled"
       @input="updateValue"
       @keydown.enter="$emit('submit')"
@@ -60,7 +60,7 @@ onMounted(focusInput)
 <style scoped>
 .input-shell {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(248, 244, 238, 0.7));
-  border: 1px solid rgba(255, 255, 255, 0.62);
+  border: 0;
 }
 
 .send-button {

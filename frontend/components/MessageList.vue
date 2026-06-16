@@ -1,5 +1,5 @@
 <template>
-  <div ref="viewport" class="message-viewport h-full min-h-0 overflow-y-auto px-4 py-5 sm:px-6">
+  <div ref="viewport" class="message-viewport h-full min-h-0 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
     <TransitionGroup name="message" tag="div" class="space-y-4">
       <div
         v-for="message in messages"
@@ -24,7 +24,7 @@
           <span class="sr-only">{{ message.role === 'assistant' ? '顾问头像' : '用户头像' }}</span>
         </div>
 
-        <div class="max-w-[84%] space-y-3">
+        <div class="max-w-[88%] space-y-3 sm:max-w-[84%]">
           <div
             class="message-bubble rounded-[24px] px-4 py-3 text-[15px] font-normal leading-7 shadow-[0_16px_36px_rgba(140,156,176,0.12)]"
             :class="message.role === 'assistant' ? 'assistant-bubble text-slate-700' : 'user-bubble text-slate-700'"
@@ -72,13 +72,16 @@ onMounted(scrollToBottom)
 
 <style scoped>
 .message-viewport {
-  background:
-    linear-gradient(180deg, rgba(255, 252, 248, 0.64), rgba(255, 255, 255, 0.14)),
-    radial-gradient(circle at top left, rgba(255, 240, 222, 0.18), transparent 22%);
-  border-right: 1px solid rgba(255, 255, 255, 0.28);
+  background: transparent;
   scrollbar-color: rgba(148, 163, 184, 0.55) transparent;
   scrollbar-gutter: stable;
   scrollbar-width: thin;
+}
+
+@media (min-width: 1024px) {
+  .message-viewport {
+    border-right: 0;
+  }
 }
 
 .message-viewport::-webkit-scrollbar {
