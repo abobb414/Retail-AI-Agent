@@ -48,12 +48,6 @@ function focusInput() {
   })
 }
 
-watch(() => props.disabled, (disabled) => {
-  if (!disabled) {
-    focusInput()
-  }
-})
-
 onMounted(focusInput)
 </script>
 

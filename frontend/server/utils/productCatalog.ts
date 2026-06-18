@@ -117,7 +117,7 @@ const productIntents: ProductIntent[] = [
     id: 'tee',
     userPattern: /半袖|短袖|t恤|tee|t-shirt|夏天.*通勤|通勤.*半袖/,
     productPattern: /半袖|短袖|t恤|tee|t shirt|t-shirt|shirt|上衣/,
-    excludeProductPattern: /夹克|外套|裤|帽|无袖|背心|幼儿|婴童|儿童|童装|宠物|狗狗|猫咪/,
+    excludeProductPattern: /长袖|夹克|外套|裤|帽|无袖|背心|幼儿|婴童|儿童|童装|宠物|狗狗|猫咪|long sleeve/,
     promptTerms: ['半袖', '短袖', 'T恤', '上衣', '夏天通勤', '透气', '凉感', '休闲短袖'],
   },
   {
@@ -275,6 +275,63 @@ function getMatchedIntents(text: string) {
   return productIntents.filter((intent) => intent.userPattern.test(normalizedText))
 }
 
+type ProductFamily = 'apparel' | 'furniture' | 'appliance' | 'lighting'
+
+const intentFamilyMap: Record<string, ProductFamily> = {
+  accessory: 'apparel',
+  air_conditioner: 'appliance',
+  kitchen_appliance: 'appliance',
+  lighting: 'lighting',
+  office_chair: 'furniture',
+  pants: 'apparel',
+  refrigerator: 'appliance',
+  seating: 'furniture',
+  shirt: 'apparel',
+  shoes: 'apparel',
+  sofa_bed: 'furniture',
+  storage: 'furniture',
+  table_desk: 'furniture',
+  tee: 'apparel',
+  tv_monitor: 'appliance',
+  washer: 'appliance',
+  weather_outerwear: 'apparel',
+}
+
+function getRequestedProductFamily(text: string) {
+  const dominantIntent = getDominantIntent(text)
+  return dominantIntent ? intentFamilyMap[dominantIntent.id] ?? null : null
+}
+
+function isProductInFamily(product: CatalogProduct, family: ProductFamily) {
+  const productText = getRawProductText(product)
+  if (family === 'apparel') {
+    return /服饰|女装|男装|童装|衣服|上衣|t恤|半袖|短袖|衬衫|衬衣|外套|夹克|裤|鞋|帽|背包|配件|tee|t shirt|t-shirt|shirt|jacket|coat|pants|trouser|shorts|sneaker|shoe|footwear|apparel|clothing/.test(productText)
+      && !/家具|家居|沙发|床|椅|凳|桌|柜|家电|空调|冰箱|电视|洗衣机|office furniture|chair|sofa|bed|desk|table|cabinet|appliance/.test(productText)
+  }
+
+  if (family === 'furniture') {
+    return /家具|家居|沙发|床|椅|凳|桌|柜|收纳|置物|书房|客厅|卧室|office furniture|chair|sofa|bed|desk|table|cabinet|storage|shelf|wood-focused furniture/.test(productText)
+      && !/服饰|衣服|t恤|半袖|短袖|衬衫|裤|鞋|家电|空调|冰箱|电视|洗衣机/.test(productText)
+  }
+
+  if (family === 'appliance') {
+    return /家电|空调|冰箱|电视|显示器|洗衣机|烘干|厨电|洗碗机|烤箱|微波炉|air conditioner|refrigerator|fridge|washer|dryer|monitor|tv|dishwasher|oven|microwave|appliance|cooling/.test(productText)
+      && !/服饰|衣服|t恤|半袖|短袖|衬衫|裤|鞋|家具|沙发|床|椅|桌/.test(productText)
+  }
+
+  return /灯|台灯|落地灯|灯泡|照明|\blamp\b|\blight\b|\blantern\b/.test(productText)
+    && !/服饰|衣服|t恤|半袖|短袖|衬衫|裤|鞋|家具|沙发|床|椅|桌|家电|空调|冰箱|电视|furniture|chair|sofa|bed|headboard|desk|table|appliance/.test(productText)
+}
+
+function isProductCompatibleWithRequest(product: CatalogProduct, text: string) {
+  const requestedFamily = getRequestedProductFamily(text)
+  if (requestedFamily && !isProductInFamily(product, requestedFamily)) {
+    return false
+  }
+
+  return isProductWithinBudget(product, text)
+}
+
 function getGenderPreference(text: string) {
   if (/男的|我是男|男士|男式|男子|男款|男生|男性|men|mens|man/.test(text)) {
     return 'male'
@@ -299,6 +356,49 @@ function hasRequestedBrand(text: string) {
   const normalizedText = normalizeText(text)
   return ['uniqlo', '优衣库', 'lululemon', '露露乐蒙', 'muji', '无印良品', 'ikea', '宜家', 'xiaomi', '小米', '米家', 'adidas', '阿迪达斯', 'nike', '耐克']
     .some((brand) => normalizedText.includes(normalizeText(brand)))
+}
+
+function getRequestedBudget(text: string) {
+  const budgetMatch = text.match(/(?:预算|价格|价位)?\s*(\d{2,6})\s*(?:元|块|以内|以下|左右|上下)?/)
+  if (!budgetMatch) {
+    return null
+  }
+
+  const budget = Number(budgetMatch[1])
+  return Number.isFinite(budget) ? budget : null
+}
+
+function getProductCnyPrice(product: CatalogProduct) {
+  const cnyMatch = product.price_range.match(/CNY\s*([\d.]+)/i)
+  const cnyPrice = Number(cnyMatch?.[1])
+  const productText = [
+    product.name,
+    product.price_range,
+    ...product.keywords,
+  ].join(' ')
+  const yuanPrices = [...productText.matchAll(/(\d{2,6})\s*元/g)]
+    .map((match) => Number(match[1]))
+    .filter((price) => Number.isFinite(price))
+
+  if (yuanPrices.length) {
+    return Math.max(...yuanPrices)
+  }
+
+  return Number.isFinite(cnyPrice) && cnyPrice >= 20 ? cnyPrice : null
+}
+
+function isProductWithinBudget(product: CatalogProduct, text: string) {
+  const budget = getRequestedBudget(text)
+  if (!budget) {
+    return true
+  }
+
+  const price = getProductCnyPrice(product)
+  if (!price) {
+    return false
+  }
+
+  return price <= budget
 }
 
 function getRequestedBrandAliases(text: string) {
@@ -418,15 +518,11 @@ function scoreIntentFit(product: CatalogProduct, userText: string) {
     score -= 44
   }
 
-  const budgetMatch = userText.match(/(?:预算|价格|价位)?\s*(\d{2,6})\s*(?:元|块|以内|以下|左右)?/)
-  const productPriceMatch = product.price_range.match(/CNY\s*([\d.]+)/i)
-  if (budgetMatch && productPriceMatch) {
-    const budget = Number(budgetMatch[1])
-    const price = Number(productPriceMatch[1])
-    if (Number.isFinite(budget) && Number.isFinite(price)) {
-      score += price <= budget ? 24 : -24
-    }
-  } else if (budgetMatch && /价格以官网为准|price on request|官网/.test(product.price_range)) {
+  const budget = getRequestedBudget(userText)
+  const price = getProductCnyPrice(product)
+  if (budget && price) {
+    score += price <= budget ? 24 : -80
+  } else if (budget && /价格以官网为准|price on request|官网/.test(product.price_range)) {
     score -= 12
   }
 
@@ -459,6 +555,9 @@ function filterByStrongIntent(products: CatalogProduct[], text: string) {
         return false
       }
       if (hasOppositeGender(productText, genderPreference)) {
+        return false
+      }
+      if (!isProductCompatibleWithRequest(product, text)) {
         return false
       }
       return true
@@ -608,7 +707,129 @@ function getMatchedPreferences(product: CatalogProduct, userText: string) {
   return matches.length ? matches : product.scenarios.slice(0, 3)
 }
 
+function hasBudgetSignal(text: string) {
+  return /预算|价格|价位|\d{2,6}\s*(元|块|以内|以下|左右|上下)|低预算|中预算|高预算|便宜|平价|贵一点|不差钱/.test(text)
+}
+
+function hasWearerSignal(text: string) {
+  return /男的|我是男|男士|男式|男子|男款|男生|男性|女的|我是女|女士|女式|女子|女款|女生|女性|中性|情侣|儿童|孩子|童|幼儿|大童|小童|婴童|宝宝|men|mens|man|women|womens|woman|unisex|尺码|码数|s码|m码|l码|xl|xxl|大码|小个子|高个子/.test(text)
+}
+
+function hasFurnitureContextSignal(text: string) {
+  return /卧室|书房|客厅|餐厅|玄关|厨房|办公室|办公|工作|久坐|电脑|显示器|小户型|租房|儿童房|床头|阳台|收纳|整理|置物|几口人|几个人|单人|双人|尺寸|宽|高|深|cm|厘米|平米|㎡|风格|原木|实木|橡木|日式|北欧/.test(text)
+}
+
+function hasApplianceContextSignal(text: string) {
+  return /面积|平米|㎡|几口人|容量|升|l\b|安装|预留|嵌入|台式|独立式|能效|一级|二级|变频|制冷|制热|除湿|洗烘|烘干|游戏|观影|客厅|卧室|厨房/.test(text)
+}
+
+function hasLightingContextSignal(text: string) {
+  return /床头|书桌|桌面|阅读|学习|卧室|客厅|餐厅|玄关|氛围|夜灯|护眼|调光|色温|亮度|落地|台式|吊灯/.test(text)
+}
+
+interface SlotRequirement {
+  id: string
+  label: string
+  isSatisfied: (text: string) => boolean
+}
+
+const slotRequirementsByFamily: Record<ProductFamily, SlotRequirement[]> = {
+  apparel: [
+    {
+      id: 'wearer',
+      label: '男士/女士/中性或尺码',
+      isSatisfied: hasWearerSignal,
+    },
+    {
+      id: 'budget',
+      label: '预算',
+      isSatisfied: hasBudgetSignal,
+    },
+  ],
+  furniture: [
+    {
+      id: 'space_use_or_size',
+      label: '使用空间、用途或尺寸',
+      isSatisfied: hasFurnitureContextSignal,
+    },
+    {
+      id: 'budget',
+      label: '预算',
+      isSatisfied: hasBudgetSignal,
+    },
+  ],
+  appliance: [
+    {
+      id: 'install_capacity_or_scene',
+      label: '安装条件、容量/面积或使用场景',
+      isSatisfied: hasApplianceContextSignal,
+    },
+    {
+      id: 'budget',
+      label: '预算',
+      isSatisfied: hasBudgetSignal,
+    },
+  ],
+  lighting: [
+    {
+      id: 'location_or_lighting_need',
+      label: '使用位置或照明需求',
+      isSatisfied: hasLightingContextSignal,
+    },
+    {
+      id: 'budget',
+      label: '预算',
+      isSatisfied: hasBudgetSignal,
+    },
+  ],
+}
+
+function getMissingSlotRequirements(text: string) {
+  const family = getRequestedProductFamily(text)
+  if (!family) {
+    return []
+  }
+
+  return slotRequirementsByFamily[family].filter((requirement) => !requirement.isSatisfied(text))
+}
+
+function getClarificationPrefix(family: ProductFamily) {
+  if (family === 'apparel') {
+    return '可以，我先不急着硬推。'
+  }
+  if (family === 'furniture') {
+    return '可以，我先把方向收窄一下。'
+  }
+  if (family === 'appliance') {
+    return '可以，家电先把关键条件确认好。'
+  }
+  return '可以，灯具先看使用位置和预算。'
+}
+
+function getSlotQuestion(family: ProductFamily, missingRequirements: SlotRequirement[]) {
+  const missingLabels = missingRequirements.map((requirement) => requirement.label)
+  if (missingLabels.length === 1) {
+    return `${getClarificationPrefix(family)}还差一个信息：${missingLabels[0]}？`
+  }
+
+  return `${getClarificationPrefix(family)}还差这几个关键信息：${missingLabels.join('、')}？`
+}
+
+export function getRecommendationClarificationMessage(text: string) {
+  const family = getRequestedProductFamily(text)
+  if (!family) {
+    return null
+  }
+
+  const missingRequirements = getMissingSlotRequirements(text)
+  return missingRequirements.length ? getSlotQuestion(family, missingRequirements) : null
+}
+
 export function shouldClarifyBeforeRecommendation(text: string) {
+  if (getRecommendationClarificationMessage(text)) {
+    return true
+  }
+
   const compactText = text.replace(/\s+/g, '')
   const hasStrongContext = /桌面|一团糟|收纳|整理|理一下|新工作|加班|好累|疲惫|治愈|幸福感|卧室|书房|客厅|餐厅|玄关|厨房|办公室|办公|工作|久坐|睡前|放松|浅木|原木|实木|橡木|白橡木|预算|小户型|日式|电脑|显示器|床头|氛围|早餐|通勤|阅读|学习|运动|训练|跑步|瑜伽|户外|登山|露营|空调|冰箱|洗衣|电视|烤箱|微波|品牌|adidas|阿迪达斯|nike|耐克|lululemon|露露乐蒙|uniqlo|优衣库|muji|无印良品|ikea|宜家|三星|小米|米家|海尔|格力|tcl|lg|bosch|博世|panasonic|松下|男|女|儿童|夏天|冬天|透气|宽松|修身|纯棉|速干|防晒|大码|小个子|高个子|[0-9]+元/.test(text)
 
@@ -631,6 +852,7 @@ function findBestProduct(products: CatalogProduct[], text: string) {
   }
 
   const scoredProducts = filterByStrongIntent(brandFilteredProducts, text)
+    .filter((product) => isProductCompatibleWithRequest(product, text))
     .map((product) => ({
       product,
       score: scoreProduct(product, text),
@@ -656,7 +878,7 @@ export function pickProductRecommendation(text: string) {
     ? bestMatch
     : findBestProduct(curatedProducts, text)
 
-  if (!selectedMatch || selectedMatch.score < 6) {
+  if (!selectedMatch || selectedMatch.score < 6 || !isProductCompatibleWithRequest(selectedMatch.product, text)) {
     return null
   }
 

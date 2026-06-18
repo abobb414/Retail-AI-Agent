@@ -4,6 +4,8 @@
       <div
         v-for="message in messages"
         :key="message.id"
+        :data-message-id="message.id"
+        :data-message-role="message.role"
         class="flex items-start gap-3"
         :class="message.role === 'user' ? 'flex-row-reverse' : ''"
       >
@@ -52,18 +54,44 @@ const props = defineProps<{
 
 const viewport = ref<HTMLElement | null>(null)
 
-function scrollToBottom() {
+function scrollToBottom(behavior: ScrollBehavior = 'auto') {
   const element = viewport.value
   if (element) {
-    element.scrollTo({ top: element.scrollHeight, behavior: 'smooth' })
+    element.scrollTo({ top: element.scrollHeight, behavior })
   }
 }
 
+function scrollMessageIntoReadingPosition(messageId: number, behavior: ScrollBehavior = 'smooth') {
+  const element = viewport.value
+  const target = element?.querySelector<HTMLElement>(`[data-message-id="${messageId}"]`)
+  if (!element || !target) {
+    return
+  }
+
+  const viewportTop = element.getBoundingClientRect().top
+  const targetTop = target.getBoundingClientRect().top
+  const readingOffset = 16
+  element.scrollTo({
+    top: element.scrollTop + targetTop - viewportTop - readingOffset,
+    behavior,
+  })
+}
+
 watch(
-  () => props.messages.map((message) => `${message.id}:${message.content}:${message.isStreaming ? '1' : '0'}:${message.recommendation?.name ?? ''}`).join('|'),
+  () => props.messages.map((message) => `${message.id}:${message.role}`).join('|'),
   async () => {
     await nextTick()
-    scrollToBottom()
+    const latestMessage = props.messages.at(-1)
+    if (!latestMessage) {
+      return
+    }
+
+    if (latestMessage.role === 'assistant') {
+      scrollMessageIntoReadingPosition(latestMessage.id)
+      return
+    }
+
+    scrollToBottom('smooth')
   },
 )
 

@@ -53,7 +53,10 @@ export default defineEventHandler(async (event) => {
   const recommendationContext = getRecentUserContext(messages)
   const clientDirective = body.clientDirective?.trim()
   const hasRecommendationIntent = wantsProductRecommendation(recommendationContext)
-  const selectedProduct = hasRecommendationIntent
+  const clarificationMessage = hasRecommendationIntent
+    ? getRecommendationClarificationMessage(recommendationContext)
+    : null
+  const selectedProduct = hasRecommendationIntent && !clarificationMessage
     ? pickProductRecommendation(recommendationContext)
     : null
   let assistantText = ''
@@ -65,6 +68,18 @@ export default defineEventHandler(async (event) => {
   if (!apiKey) {
     event.node.res.statusCode = 500
     writeEvent(event, 'error', { message: 'DeepSeek API Key 未配置。' })
+    event.node.res.end()
+    return
+  }
+
+  if (clarificationMessage) {
+    writeEvent(event, 'chunk', { text: clarificationMessage })
+    writeEvent(event, 'meta', {
+      mode: 'deepseek',
+      stage: 'clarify_slots',
+      profile_summary: [],
+    })
+    writeEvent(event, 'done', { source: 'slot_guard' })
     event.node.res.end()
     return
   }
