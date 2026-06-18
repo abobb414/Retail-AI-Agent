@@ -38,7 +38,12 @@
               {{ prompt }}
             </button>
           </div>
-          <InputBar v-model="draft" :disabled="isStreaming" @submit="sendMessage" />
+          <InputBar
+            v-model="draft"
+            :auto-focus-on-enable="!activeRecommendation"
+            :disabled="isStreaming"
+            @submit="sendMessage"
+          />
         </div>
       </footer>
     </div>

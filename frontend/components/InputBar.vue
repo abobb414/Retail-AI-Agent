@@ -27,6 +27,7 @@
 
 <script setup lang="ts">
 const props = defineProps<{
+  autoFocusOnEnable?: boolean
   disabled?: boolean
   modelValue: string
 }>()
@@ -43,10 +44,20 @@ function updateValue(event: Event) {
 const inputElement = ref<HTMLInputElement | null>(null)
 
 function focusInput() {
+  if (props.disabled || props.autoFocusOnEnable === false) {
+    return
+  }
+
   requestAnimationFrame(() => {
     inputElement.value?.focus()
   })
 }
+
+watch(() => [props.disabled, props.autoFocusOnEnable] as const, ([disabled, autoFocusOnEnable]) => {
+  if (!disabled && autoFocusOnEnable !== false) {
+    focusInput()
+  }
+})
 
 onMounted(focusInput)
 </script>
