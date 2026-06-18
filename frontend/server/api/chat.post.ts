@@ -1,3 +1,6 @@
+import { pickProductRecommendation } from '../utils/productCatalog'
+import { getRecommendationClarificationMessage, wantsProductRecommendation } from '../utils/recommendationSlots'
+
 interface IncomingMessage {
   role: 'assistant' | 'user'
   content: string
