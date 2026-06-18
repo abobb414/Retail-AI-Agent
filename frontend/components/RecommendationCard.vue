@@ -3,11 +3,11 @@
     <div class="recommend-cover relative h-56 overflow-hidden sm:h-64">
       <img
         v-if="showImage"
-        :src="proxiedImage"
+        :src="displayImage"
         :alt="recommendation.name"
         class="h-full w-full object-cover"
         loading="lazy"
-        @error="imageFailed = true"
+        @error="handleImageError"
       >
       <div v-else class="flex h-full w-full flex-col justify-end bg-[linear-gradient(135deg,#dceee8,#e7f0f7)] p-6">
         <p class="text-[11px] uppercase tracking-[0.22em] text-slate-500">暂无可用商品图</p>
@@ -84,23 +84,47 @@ const props = defineProps<{
 }>()
 
 const imageFailed = ref(false)
+const useProxyFallback = ref(false)
 
-const proxiedImage = computed(() => {
+const proxyImage = computed(() => {
   if (!props.recommendation.image) {
     return ''
-  }
-
-  if (props.recommendation.image.startsWith('/')) {
-    return props.recommendation.image
   }
 
   return `/api/image?url=${encodeURIComponent(props.recommendation.image)}`
 })
 
-const showImage = computed(() => Boolean(proxiedImage.value) && !imageFailed.value)
+const displayImage = computed(() => {
+  const image = props.recommendation.image
+  if (!image) {
+    return ''
+  }
+
+  if (image.startsWith('/')) {
+    return image
+  }
+
+  if (image.startsWith('https://') && !useProxyFallback.value) {
+    return image
+  }
+
+  return proxyImage.value
+})
+
+const showImage = computed(() => Boolean(displayImage.value) && !imageFailed.value)
+
+function handleImageError() {
+  if (props.recommendation.image?.startsWith('https://') && !useProxyFallback.value) {
+    useProxyFallback.value = true
+    return
+  }
+
+  imageFailed.value = true
+}
 
 watch(() => props.recommendation.image, () => {
   imageFailed.value = false
+  useProxyFallback.value = false
 })
 </script>
 

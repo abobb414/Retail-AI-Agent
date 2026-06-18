@@ -440,7 +440,7 @@ function isPoorDisplayImage(product: CatalogProduct) {
     return true
   }
 
-  if (brand.includes('uniqlo') && /\/hmall\/test\/.+\/chip\//.test(image)) {
+  if (brand.includes('uniqlo') && /\/hmall\/test\//.test(image)) {
     return true
   }
 
