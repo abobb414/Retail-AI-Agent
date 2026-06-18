@@ -244,18 +244,6 @@ function getRawProductText(product: CatalogProduct) {
   ].join(' '))
 }
 
-function getProductSearchText(product: CatalogProduct) {
-  const rawProductText = getRawProductText(product)
-  const inferredPromptTerms = productIntents
-    .filter((intent) => intent.productPattern.test(rawProductText))
-    .flatMap((intent) => intent.promptTerms)
-
-  return normalizeText([
-    rawProductText,
-    ...inferredPromptTerms,
-  ].join(' '))
-}
-
 function getDominantIntent(text: string) {
   const turns = text.split(/[；;\n]/).map((turn) => turn.trim()).filter(Boolean)
   for (const turn of [...turns].reverse()) {

@@ -86,13 +86,9 @@ const props = defineProps<{
 const imageFailed = ref(false)
 const useProxyFallback = ref(false)
 
-const proxyImage = computed(() => {
-  if (!props.recommendation.image) {
-    return ''
-  }
-
-  return `/api/image?url=${encodeURIComponent(props.recommendation.image)}`
-})
+function getProxyImage(image: string) {
+  return `/api/image?url=${encodeURIComponent(image)}`
+}
 
 const displayImage = computed(() => {
   const image = props.recommendation.image
@@ -108,7 +104,7 @@ const displayImage = computed(() => {
     return image
   }
 
-  return proxyImage.value
+  return getProxyImage(image)
 })
 
 const showImage = computed(() => Boolean(displayImage.value) && !imageFailed.value)

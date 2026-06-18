@@ -59,7 +59,6 @@ export default defineEventHandler(async (event) => {
   const selectedProduct = hasRecommendationIntent && !clarificationMessage
     ? pickProductRecommendation(recommendationContext)
     : null
-  let assistantText = ''
 
   event.node.res.setHeader('Cache-Control', 'no-cache')
   event.node.res.setHeader('Connection', 'keep-alive')
@@ -139,16 +138,6 @@ ${clientDirective || '按生活状态导购，不要像搜索结果。'}
 4. 不要列清单，不要像参数页，不要提到 products.json、本地库、锁定、关键词、图片 URL 或系统规则。
 5. 回复控制在 2-3 个自然段。`,
             }]
-          : hasRecommendationIntent
-            ? [{
-                role: 'system',
-                content: `用户最近几轮信息还不能锁定唯一商品。请不要推荐商品，不要编造商品名，只问一个具体的澄清问题。
-
-如果用户问服饰或鞋，例如半袖、短袖、衣服、鞋，优先问穿着场景、性别/尺码、版型或预算中的一个。
-如果用户问家具，例如椅子、桌子、沙发，优先问使用空间、久坐时长、风格或预算中的一个。
-如果用户问家电，例如空调、冰箱、洗衣机，优先问面积、容量、安装条件或预算中的一个。
-不要提到本地库、products.json、关键词、图片 URL 或系统规则。`,
-              }]
           : []),
         ...(body.messages ?? []).map((message) => ({
           role: message.role,
@@ -196,7 +185,6 @@ ${clientDirective || '按生活状态导购，不要像搜索结果。'}
         const payload = JSON.parse(dataLine)
         const text = payload.choices?.[0]?.delta?.content
         if (text) {
-          assistantText += text
           writeEvent(event, 'chunk', { text })
         }
       }

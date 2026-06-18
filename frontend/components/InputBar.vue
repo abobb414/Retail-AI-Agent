@@ -41,10 +41,11 @@ function updateValue(event: Event) {
   emit('update:modelValue', (event.target as HTMLInputElement).value)
 }
 
+const shouldAutoFocus = computed(() => !props.disabled && props.autoFocusOnEnable !== false)
 const inputElement = ref<HTMLInputElement | null>(null)
 
 function focusInput() {
-  if (props.disabled || props.autoFocusOnEnable === false) {
+  if (!shouldAutoFocus.value) {
     return
   }
 
@@ -53,8 +54,8 @@ function focusInput() {
   })
 }
 
-watch(() => [props.disabled, props.autoFocusOnEnable] as const, ([disabled, autoFocusOnEnable]) => {
-  if (!disabled && autoFocusOnEnable !== false) {
+watch(shouldAutoFocus, (autoFocus) => {
+  if (autoFocus) {
     focusInput()
   }
 })
