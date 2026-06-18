@@ -14,6 +14,26 @@ function isBlockedHost(hostname: string) {
   )
 }
 
+function getImageRequestHeaders(parsedUrl: URL) {
+  const hostname = parsedUrl.hostname.toLowerCase()
+  const headers: Record<string, string> = {
+    Accept: 'image/avif,image/webp,image/*,*/*',
+    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36',
+  }
+
+  if (hostname.endsWith('haier.com')) {
+    headers.Referer = 'https://www.haier.com/'
+  } else if (hostname.endsWith('gree.com')) {
+    headers.Referer = 'https://www.gree.com/'
+  } else if (hostname.endsWith('quanyou.com.cn') || hostname.endsWith('aliyuncs.com')) {
+    headers.Referer = 'https://www.quanyou.com.cn/'
+  } else if (hostname.endsWith('tcl.com')) {
+    headers.Referer = 'https://www.tcl.com/'
+  }
+
+  return headers
+}
+
 export default defineEventHandler(async (event) => {
   const rawUrl = getQuery(event).url
   const imageUrl = Array.isArray(rawUrl) ? rawUrl[0] : rawUrl
@@ -28,9 +48,7 @@ export default defineEventHandler(async (event) => {
   }
 
   const response = await fetch(parsedUrl, {
-    headers: {
-      Accept: 'image/avif,image/webp,image/*,*/*',
-    },
+    headers: getImageRequestHeaders(parsedUrl),
   })
 
   if (!response.ok || !response.body) {

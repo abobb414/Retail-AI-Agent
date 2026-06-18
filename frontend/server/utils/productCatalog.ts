@@ -440,6 +440,10 @@ function isPoorDisplayImage(product: CatalogProduct) {
     return true
   }
 
+  if (/aws-obg-image-lb-\d+\.tcl\.com/.test(image)) {
+    return true
+  }
+
   if (brand.includes('uniqlo') && /\/hmall\/test\//.test(image)) {
     return true
   }
