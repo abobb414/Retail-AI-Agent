@@ -4,6 +4,8 @@ import { getBrandAliases, normalizeText } from './catalogText'
 
 export function isProductInFamily(product: CatalogProduct, family: ProductFamily) {
   const productText = getRawProductText(product)
+  const productName = normalizeText(product.name)
+
   if (family === 'apparel') {
     return /服饰|女装|男装|童装|衣服|上衣|t恤|半袖|短袖|衬衫|衬衣|外套|夹克|裤|鞋|帽|背包|配件|tee|t shirt|t-shirt|shirt|jacket|coat|pants|trouser|shorts|sneaker|shoe|footwear|apparel|clothing/.test(productText)
       && !/家具|家居|沙发|床|椅|凳|桌|柜|家电|空调|冰箱|电视|洗衣机|office furniture|chair|sofa|bed|desk|table|cabinet|appliance/.test(productText)
@@ -20,6 +22,11 @@ export function isProductInFamily(product: CatalogProduct, family: ProductFamily
   }
 
   if (family === 'tableware') {
+    // Product name must contain a tableware keyword — prevents furniture
+    // whose description mentions "盘/杯" from matching
+    if (!/杯|碗|盘|筷|勺|叉|壶|餐垫|餐具|马克杯|保温杯|bowl|plate|cup|mug|chopstick|spoon|fork/.test(productName)) {
+      return false
+    }
     return /杯|碗|盘|筷|勺|叉|壶|餐垫|餐具|厨具|马克杯|保温杯|餐盘|饭碗|汤碗|容器|便当|餐盒|bowl|plate|cup|mug|chopstick|spoon|fork|kitchenware|tableware|dinnerware/.test(productText)
       && !/硬盘|键盘|鼠标|显示器|手机|电脑|笔记本|平板|电视|冰箱|空调|洗衣机|沙发|床|椅|桌|柜|世界杯|洗碗机|洗碗|盘扣|眼影|吸盘/.test(productText)
   }
