@@ -20,6 +20,10 @@ export function isPoorDisplayImage(product: CatalogProduct) {
     return true
   }
 
+  if (brand.includes('haier') && /image\.haier\.com/.test(image)) {
+    return true
+  }
+
   return false
 }
 

@@ -1,7 +1,8 @@
 import productsJson from '../data/products.json'
 import realProductsJson from '../data/realProducts.json'
-import type { CatalogProduct, ScoredProduct } from './catalogTypes'
-import { filterByRequestedBrand, getGenderPreference, getProductCnyPrice, getRequestedBudget, hasOppositeGender, hasRequestedBrand, isProductCompatibleWithRequest } from './catalogFilters'
+import type { CatalogProduct, ProductIntent, ScoredProduct } from './catalogTypes'
+import { getGenderPreference, getProductCnyPrice, getRequestedBudget, hasOppositeGender, hasRequestedBrand, isProductInFamily } from './catalogFilters'
+import { getRequestedProductFamily } from './catalogIntents'
 import { getDominantIntent, getMatchedIntents, getRawProductText } from './catalogIntents'
 import { getBrandAliases, normalizeText, scoreKeyword, stableHash, tokenize } from './catalogText'
 import { getDisplayImage, isPoorDisplayImage } from './productImagePolicy'
@@ -10,157 +11,144 @@ import { shouldClarifyBeforeRecommendation } from './recommendationSlots'
 const curatedProducts = productsJson as CatalogProduct[]
 const crawledProducts = (realProductsJson as { products: CatalogProduct[] }).products
 
-function scoreIntentFit(product: CatalogProduct, userText: string) {
-  const productText = getRawProductText(product)
-  const dominantIntent = getDominantIntent(userText)
-  const genderPreference = getGenderPreference(userText)
+interface UserTextAnalysis {
+  normalizedText: string
+  tokens: string[]
+  dominantIntent: ProductIntent | null
+  matchedIntents: ProductIntent[]
+  genderPreference: 'male' | 'female' | null
+  budget: number | null
+  hasBrand: boolean
+}
+
+const _analysisCache = new Map<string, UserTextAnalysis>()
+function analyzeUserText(text: string): UserTextAnalysis {
+  let cached = _analysisCache.get(text)
+  if (cached !== undefined) return cached
+  if (_analysisCache.size > 500) _analysisCache.clear()
+
+  const normalizedText = normalizeText(text)
+  cached = {
+    normalizedText,
+    tokens: tokenize(text),
+    dominantIntent: getDominantIntent(text),
+    matchedIntents: getMatchedIntents(text),
+    genderPreference: getGenderPreference(text),
+    budget: getRequestedBudget(text),
+    hasBrand: hasRequestedBrand(text),
+  }
+  _analysisCache.set(text, cached)
+  return cached
+}
+
+function scoreIntentFit(productText: string, ctx: UserTextAnalysis) {
   let score = 0
 
-  for (const intent of getMatchedIntents(userText)) {
+  for (const intent of ctx.matchedIntents) {
+    const isDominant = intent.id === ctx.dominantIntent?.id
     if (intent.productPattern.test(productText)) {
-      score += intent.id === dominantIntent?.id ? 180 : 70
+      score += isDominant ? 180 : 70
     } else {
-      score -= intent.id === dominantIntent?.id ? 140 : 30
+      score -= isDominant ? 140 : 30
     }
-
     if (intent.requireProductPattern && !intent.requireProductPattern.test(productText)) {
-      score -= intent.id === dominantIntent?.id ? 80 : 20
+      score -= isDominant ? 80 : 20
     }
     if (intent.excludeProductPattern?.test(productText)) {
-      score -= intent.id === dominantIntent?.id ? 160 : 40
+      score -= isDominant ? 160 : 40
     }
   }
 
-  if (!/宠物|狗狗|猫咪/.test(userText) && /宠物|狗狗|猫咪/.test(productText)) {
+  if (!/宠物|狗狗|猫咪/.test(ctx.normalizedText) && /宠物|狗狗|猫咪/.test(productText)) {
     score -= 220
   }
-  if (!/儿童|孩子|童|幼儿|大童|小童|婴童|宝宝|baby|infant|toddler|kids/.test(userText) && /儿童|幼儿|婴童|宝宝|大童|小童|男童|女童|童装|baby|infant|toddler|kids/.test(productText)) {
+  if (!/儿童|孩子|童|幼儿|大童|小童|婴童|宝宝|baby|infant|toddler|kids/.test(ctx.normalizedText) && /儿童|幼儿|婴童|宝宝|大童|小童|男童|女童|童装|baby|infant|toddler|kids/.test(productText)) {
     score -= 160
   }
-  if (hasOppositeGender(productText, genderPreference)) {
+  if (hasOppositeGender(productText, ctx.genderPreference)) {
     score -= 260
-  }
-  if (isPoorDisplayImage(product) && !hasRequestedBrand(userText)) {
-    score -= 44
-  }
-
-  const budget = getRequestedBudget(userText)
-  const price = getProductCnyPrice(product)
-  if (budget && price) {
-    score += price <= budget ? 24 : -80
-  } else if (budget && /价格以官网为准|price on request|官网/.test(product.price_range)) {
-    score -= 12
   }
 
   return score
 }
 
-function filterByStrongIntent(products: CatalogProduct[], text: string) {
-  const intent = getDominantIntent(text)
-  const genderPreference = getGenderPreference(text)
-  if (!intent) {
-    return products
-  }
-
-  const filteredProducts = products
-    .filter((product) => {
-      const productText = getRawProductText(product)
-      if (!intent.productPattern.test(productText)) {
-        return false
-      }
-      if (intent.requireProductPattern && !intent.requireProductPattern.test(productText)) {
-        return false
-      }
-      if (intent.excludeProductPattern?.test(productText)) {
-        return false
-      }
-      if (!/宠物|狗狗|猫咪/.test(text) && /宠物|狗狗|猫咪/.test(productText)) {
-        return false
-      }
-      if (!/儿童|孩子|童|幼儿|大童|小童|婴童|宝宝|baby|infant|toddler|kids/.test(text) && /儿童|幼儿|婴童|宝宝|大童|小童|男童|女童|童装|baby|infant|toddler|kids/.test(productText)) {
-        return false
-      }
-      if (hasOppositeGender(productText, genderPreference)) {
-        return false
-      }
-      if (!isProductCompatibleWithRequest(product, text)) {
-        return false
-      }
-      return true
-    })
-
-  if (filteredProducts.length) {
-    return filteredProducts
-  }
-
-  return intent.requireProductPattern ? [] : products
+function passIntentFilter(productText: string, intent: ProductIntent | null, text: string) {
+  if (!intent) return true
+  if (!intent.productPattern.test(productText)) return false
+  if (intent.requireProductPattern && !intent.requireProductPattern.test(productText)) return false
+  if (intent.excludeProductPattern?.test(productText)) return false
+  if (!/宠物|狗狗|猫咪/.test(text) && /宠物|狗狗|猫咪/.test(productText)) return false
+  if (!/儿童|孩子|童|幼儿|大童|小童|婴童|宝宝|baby|infant|toddler|kids/.test(text) && /儿童|幼儿|婴童|宝宝|大童|小童|男童|女童|童装|baby|infant|toddler|kids/.test(productText)) return false
+  return true
 }
 
-function scoreProduct(product: CatalogProduct, userText: string) {
-  const normalizedText = normalizeText(userText)
-  const tokens = tokenize(userText)
+function scoreProduct(product: CatalogProduct, ctx: UserTextAnalysis) {
+  const productText = getRawProductText(product)
   const fields = [
-    product.name,
-    product.brand,
-    product.category,
-    product.materials,
-    product.craftsmanship,
-    product.feature,
-    product.benefit,
-    product.pairing_note,
+    product.name, product.brand, product.category, product.materials,
+    product.craftsmanship, product.feature, product.benefit, product.pairing_note,
     ...getBrandAliases(product.brand),
-    ...product.keywords,
-    ...product.style_tags,
-    ...product.room_tags,
-    ...product.scenarios,
+    ...product.keywords, ...product.style_tags, ...product.room_tags, ...product.scenarios,
   ]
 
   let score = 0
-  for (const field of fields) {
-    score += scoreKeyword(field, normalizedText, tokens)
+  for (let i = 0; i < fields.length; i++) {
+    score += scoreKeyword(fields[i], ctx.normalizedText, ctx.tokens)
   }
 
-  score += scoreKeyword(product.brand, normalizedText, tokens) * 6
-  for (const alias of getBrandAliases(product.brand)) {
-    score += scoreKeyword(alias, normalizedText, tokens) * 8
+  score += scoreKeyword(product.brand, ctx.normalizedText, ctx.tokens) * 6
+  const aliases = getBrandAliases(product.brand)
+  for (let i = 0; i < aliases.length; i++) {
+    score += scoreKeyword(aliases[i], ctx.normalizedText, ctx.tokens) * 8
   }
 
-  for (const keyword of product.keywords) {
-    score += scoreKeyword(keyword, normalizedText, tokens) * 2
+  for (let i = 0; i < product.keywords.length; i++) {
+    score += scoreKeyword(product.keywords[i], ctx.normalizedText, ctx.tokens) * 2
   }
 
-  return score + scoreIntentFit(product, userText)
-}
+  score += scoreIntentFit(productText, ctx)
 
-function scoreExactProductSignal(product: CatalogProduct, userText: string) {
-  const normalizedText = normalizeText(userText)
-  let score = 0
+  if (isPoorDisplayImage(product) && !ctx.hasBrand) {
+    score -= 44
+  }
 
-  const exactFields = [product.name, product.id, product.source_url]
-    .map((field) => normalizeText(field))
-    .filter((field) => field.length >= 4)
-
-  for (const field of exactFields) {
-    if (normalizedText.includes(field)) {
-      score += field === normalizeText(product.name) ? 260 : 160
+  if (ctx.budget) {
+    const price = getProductCnyPrice(product)
+    if (price) {
+      score += price <= ctx.budget ? 24 : -80
+    } else if (/价格以官网为准|price on request|官网/.test(product.price_range)) {
+      score -= 12
     }
   }
 
+  return score
+}
+
+function scoreExactProductSignal(product: CatalogProduct, normalizedText: string) {
+  let score = 0
+
+  const normalizedName = normalizeText(product.name)
+  if (normalizedName.length >= 4 && normalizedText.includes(normalizedName)) {
+    score += 260
+  }
+
+  const normalizedId = normalizeText(product.id)
+  if (normalizedId.length >= 4 && normalizedText.includes(normalizedId)) {
+    score += 160
+  }
+
   const brandAliases = [product.brand, ...getBrandAliases(product.brand)]
-  const hasBrand = brandAliases.some((brand) => {
-    const normalizedBrand = normalizeText(brand)
-    return normalizedBrand && normalizedText.includes(normalizedBrand)
-  })
-  if (hasBrand) {
-    score += 80
+  for (let i = 0; i < brandAliases.length; i++) {
+    const nb = normalizeText(brandAliases[i])
+    if (nb && normalizedText.includes(nb)) {
+      score += 80
+      break
+    }
   }
 
   const modelTokens = tokenize(product.name)
-    .filter((token) => /[a-z0-9]/i.test(token) && token.length >= 3)
-    .slice(0, 6)
-
-  for (const token of modelTokens) {
-    if (normalizedText.includes(token)) {
+  for (let i = 0; i < modelTokens.length && i < 6; i++) {
+    if (/[a-z0-9]/i.test(modelTokens[i]) && modelTokens[i].length >= 3 && normalizedText.includes(modelTokens[i])) {
       score += 36
     }
   }
@@ -168,76 +156,95 @@ function scoreExactProductSignal(product: CatalogProduct, userText: string) {
   return score
 }
 
-function pickFromRelevantPool(scoredProducts: ScoredProduct[], text: string) {
+function pickFromRelevantPool(scoredProducts: ScoredProduct[], text: string, ctx: UserTextAnalysis) {
   const sortedProducts = [...scoredProducts].sort((a, b) => {
-    if (b.exactScore !== a.exactScore) {
-      return b.exactScore - a.exactScore
-    }
-    if (b.score !== a.score) {
-      return b.score - a.score
-    }
+    if (b.exactScore !== a.exactScore) return b.exactScore - a.exactScore
+    if (b.score !== a.score) return b.score - a.score
     return b.spreadScore - a.spreadScore
   })
 
   const bestMatch = sortedProducts[0]
-  if (!bestMatch) {
-    return undefined
-  }
-
-  if (bestMatch.exactScore >= 180) {
-    return bestMatch
-  }
+  if (!bestMatch) return undefined
+  if (bestMatch.exactScore >= 180) return bestMatch
 
   const topScore = bestMatch.score
   const floorScore = Math.max(6, topScore - 16, topScore * 0.92)
   const relevantPool = sortedProducts
-    .filter((candidate) => candidate.score >= floorScore)
+    .filter((c) => c.score >= floorScore)
     .slice(0, 48)
 
-  if (relevantPool.length <= 1) {
-    return bestMatch
-  }
+  if (relevantPool.length <= 1) return bestMatch
 
-  const querySeed = [
-    normalizeText(text),
-    getDominantIntent(text)?.id ?? 'general',
-  ].join('|')
-  const poolIndex = stableHash(querySeed) % relevantPool.length
-
+  const poolIndex = stableHash(`${ctx.normalizedText}|${ctx.dominantIntent?.id ?? 'general'}`) % relevantPool.length
   return relevantPool[poolIndex]
 }
 
-function getMatchedPreferences(product: CatalogProduct, userText: string) {
-  const normalizedText = normalizeText(userText)
+function getMatchedPreferences(product: CatalogProduct, normalizedText: string) {
   const matches = product.keywords
-    .filter((keyword) => normalizedText.includes(normalizeText(keyword)))
+    .filter((kw) => normalizedText.includes(normalizeText(kw)))
     .slice(0, 4)
-
   return matches.length ? matches : product.scenarios.slice(0, 3)
 }
 
 function findBestProduct(products: CatalogProduct[], text: string) {
-  const normalizedText = normalizeText(text)
-  const brandFilteredProducts = filterByRequestedBrand(products, text)
-  if (!brandFilteredProducts.length) {
+  const ctx = analyzeUserText(text)
+  const intent = ctx.dominantIntent
+
+  // Brand pre-filter
+  const brandGroups = [
+    ['uniqlo', '优衣库'], ['lululemon', '露露乐蒙'], ['muji', '无印良品'],
+    ['ikea', '宜家'], ['xiaomi', '小米', '米家', 'redmi', '红米'],
+    ['adidas', '阿迪达斯'], ['nike', '耐克'],
+  ]
+  const requestedBrandGroup = brandGroups.find((g) => g.some((b) => ctx.normalizedText.includes(normalizeText(b))))
+  const requestedBrandNorms = requestedBrandGroup?.map((b) => normalizeText(b))
+
+  const requestedFamily = getRequestedProductFamily(text)
+  const scored: ScoredProduct[] = []
+
+  for (let i = 0; i < products.length; i++) {
+    const product = products[i]
+
+    // Brand filter
+    if (requestedBrandNorms) {
+      const pBrand = normalizeText(product.brand)
+      const pAliases = getBrandAliases(product.brand).map((a) => normalizeText(a))
+      const brandMatch = requestedBrandNorms.some((b) => pBrand.includes(b) || pAliases.some((a) => a.includes(b)))
+      if (!brandMatch) continue
+    }
+
+    const productText = getRawProductText(product)
+
+    // Intent filter
+    if (intent && !passIntentFilter(productText, intent, text)) continue
+    intentFilteredCount++
+
+    // Gender filter
+    if (hasOppositeGender(productText, ctx.genderPreference)) continue
+
+    // Family filter
+    if (requestedFamily && !isProductInFamily(product, requestedFamily)) continue
+
+    // Budget filter
+    if (ctx.budget) {
+      const price = getProductCnyPrice(product)
+      if (price && price > ctx.budget) continue
+    }
+
+    scored.push({
+      product,
+      score: scoreProduct(product, ctx),
+      exactScore: scoreExactProductSignal(product, ctx.normalizedText),
+      spreadScore: stableHash(`${ctx.normalizedText}|${product.id}|${product.name}|${product.source_url}`) % 1000,
+    })
+  }
+
+  // Fallback: if intent filter removed everything, try without it
+  if (scored.length === 0 && intent?.requireProductPattern) {
     return undefined
   }
 
-  const scoredProducts = filterByStrongIntent(brandFilteredProducts, text)
-    .filter((product) => isProductCompatibleWithRequest(product, text))
-    .map((product) => ({
-      product,
-      score: scoreProduct(product, text),
-      exactScore: scoreExactProductSignal(product, text),
-      spreadScore: stableHash([
-        normalizedText,
-        product.id,
-        product.name,
-        product.source_url,
-      ].join('|')) % 1000,
-    }))
-
-  return pickFromRelevantPool(scoredProducts, text)
+  return pickFromRelevantPool(scored, text, ctx)
 }
 
 export function pickProductRecommendation(text: string) {
@@ -276,7 +283,7 @@ export function pickProductRecommendation(text: string) {
     pairing_note: displayPairing,
     craftsmanship: product.craftsmanship || displayFeature,
     consultant_summary: `${product.name} 是当前信息里比较贴近的一款：有清晰商品页、价格和图片，适合先拿它作为判断基准。`,
-    matched_preferences: getMatchedPreferences(product, text),
+    matched_preferences: getMatchedPreferences(product, normalizeText(text)),
     why_this: [
       displayBenefit,
       displayFeature,
