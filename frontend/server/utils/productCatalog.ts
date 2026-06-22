@@ -217,7 +217,6 @@ function findBestProduct(products: CatalogProduct[], text: string) {
 
     // Intent filter
     if (intent && !passIntentFilter(productText, intent, text)) continue
-    intentFilteredCount++
 
     // Gender filter
     if (hasOppositeGender(productText, ctx.genderPreference)) continue
