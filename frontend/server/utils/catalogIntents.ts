@@ -352,7 +352,7 @@ const intentFamilyMap: Record<string, ProductFamily> = {
   generic_furniture: 'furniture',
   home_decor: 'furniture',
   kitchen_appliance: 'appliance',
-  kitchenware: 'furniture',
+  kitchenware: 'tableware',
   knitwear: 'apparel',
   laptop_tablet: 'appliance',
   lighting: 'lighting',

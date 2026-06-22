@@ -31,7 +31,7 @@ export interface ProductIntent {
   requireProductPattern?: RegExp
 }
 
-export type ProductFamily = 'apparel' | 'furniture' | 'appliance' | 'lighting'
+export type ProductFamily = 'apparel' | 'furniture' | 'appliance' | 'lighting' | 'tableware'
 
 export interface SlotRequirement {
   id: string

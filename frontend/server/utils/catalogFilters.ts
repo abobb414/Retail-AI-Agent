@@ -19,6 +19,11 @@ export function isProductInFamily(product: CatalogProduct, family: ProductFamily
       && !/服饰|衣服|t恤|半袖|短袖|衬衫|裤|鞋|家具|沙发|床|椅|桌/.test(productText)
   }
 
+  if (family === 'tableware') {
+    return /杯|碗|盘|筷|勺|叉|壶|餐垫|餐具|厨具|马克杯|保温杯|餐盘|饭碗|汤碗|容器|便当|餐盒|bowl|plate|cup|mug|chopstick|spoon|fork|kitchenware|tableware|dinnerware/.test(productText)
+      && !/硬盘|键盘|鼠标|显示器|手机|电脑|笔记本|平板|电视|冰箱|空调|洗衣机|沙发|床|椅|桌|柜|世界杯|洗碗机|洗碗|盘扣|眼影|吸盘/.test(productText)
+  }
+
   return /灯|台灯|落地灯|灯泡|照明|\blamp\b|\blight\b|\blantern\b/.test(productText)
     && !/服饰|衣服|t恤|半袖|短袖|衬衫|裤|鞋|家具|沙发|床|椅|桌|家电|空调|冰箱|电视|furniture|chair|sofa|bed|headboard|desk|table|appliance/.test(productText)
 }

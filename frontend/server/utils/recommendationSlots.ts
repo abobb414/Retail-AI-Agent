@@ -10,7 +10,7 @@ function hasWearerSignal(text: string) {
 }
 
 function hasFurnitureContextSignal(text: string) {
-  return /卧室|书房|客厅|餐厅|玄关|厨房|办公室|办公|工作|久坐|电脑|显示器|小户型|租房|儿童房|床头|阳台|收纳|整理|置物|几口人|几个人|单人|双人|尺寸|宽|高|深|cm|厘米|平米|㎡|风格|原木|实木|橡木|日式|北欧/.test(text)
+  return /卧室|书房|客厅|餐厅|玄关|厨房|办公室|办公|工作|久坐|电脑|显示器|小户型|租房|儿童房|床头|阳台|收纳|整理|置物|几口人|几个人|单人|双人|尺寸|宽|高|深|cm|厘米|平米|㎡|风格|原木|实木|橡木|日式|北欧|日常|通勤|家用|随手|便携|单手/.test(text)
 }
 
 function hasApplianceContextSignal(text: string) {
@@ -19,6 +19,10 @@ function hasApplianceContextSignal(text: string) {
 
 function hasLightingContextSignal(text: string) {
   return /床头|书桌|桌面|阅读|学习|卧室|客厅|餐厅|玄关|氛围|夜灯|护眼|调光|色温|亮度|落地|台式|吊灯/.test(text)
+}
+
+function hasUserDeclinedMoreInfo(text: string) {
+  return /不需要|不用了|不用问|直接推荐|就这样|你就直接|别问了|差不多得了|随便|你看着推|够了直接|可以了直接|别再问|不要问/.test(text)
 }
 
 const slotRequirementsByFamily: Record<ProductFamily, SlotRequirement[]> = {
@@ -70,6 +74,13 @@ const slotRequirementsByFamily: Record<ProductFamily, SlotRequirement[]> = {
       isSatisfied: hasBudgetSignal,
     },
   ],
+  tableware: [
+    {
+      id: 'budget',
+      label: '预算',
+      isSatisfied: hasBudgetSignal,
+    },
+  ],
 }
 
 function getMissingSlotRequirements(text: string) {
@@ -90,6 +101,9 @@ function getClarificationPrefix(family: ProductFamily) {
   }
   if (family === 'appliance') {
     return '可以，家电先把关键条件确认好。'
+  }
+  if (family === 'tableware') {
+    return '可以，餐具这块我先把预算确认一下。'
   }
   return '可以，灯具先看使用位置和预算。'
 }
@@ -114,6 +128,10 @@ export function getRecommendationClarificationMessage(text: string) {
 }
 
 export function shouldClarifyBeforeRecommendation(text: string) {
+  if (hasUserDeclinedMoreInfo(text)) {
+    return false
+  }
+
   if (getRecommendationClarificationMessage(text)) {
     return true
   }
