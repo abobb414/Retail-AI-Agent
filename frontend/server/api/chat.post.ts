@@ -35,19 +35,34 @@ function getRecentUserContext(messages: IncomingMessage[]) {
 }
 
 function getRecommendationContext(messages: IncomingMessage[]) {
-  const fullContext = getRecentUserContext(messages)
-  const latestText = getLatestUserText(messages)
+  const userMessages = messages.filter((m) => m.role === 'user')
+  if (userMessages.length <= 1) {
+    return getRecentUserContext(messages)
+  }
 
-  // If the latest message has a different product intent than the full context,
-  // use only the latest message to avoid contaminating with previous requests
+  const latestText = userMessages[userMessages.length - 1].content.trim()
+  const previousContext = userMessages
+    .slice(-6, -1)
+    .map((m) => m.content.trim())
+    .filter(Boolean)
+    .join('；')
+
+  // If the latest message contains a clear product intent that's different
+  // from the previous context, use only the latest message
   const latestIntent = getDominantIntent(latestText)
-  const fullIntent = getDominantIntent(fullContext)
+  const previousIntent = getDominantIntent(previousContext)
 
-  if (latestIntent && fullIntent && latestIntent.id !== fullIntent.id) {
+  if (latestIntent && previousIntent && latestIntent.id !== previousIntent.id) {
     return latestText
   }
 
-  return fullContext
+  // Also: if latest message is a standalone product request (short, contains
+  // a product keyword like 盘子/碗/鞋/衣服 etc.), don't inherit old context
+  if (latestIntent && latestText.length < 30 && !/预算|价格|\d{2,6}\s*(元|块)/.test(latestText)) {
+    return latestText
+  }
+
+  return getRecentUserContext(messages)
 }
 
 function writeEvent(event: H3Event, name: string, data: unknown) {
