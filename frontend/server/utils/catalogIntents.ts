@@ -179,8 +179,8 @@ export const productIntents: ProductIntent[] = [
   {
     id: 'kitchenware',
     userPattern: /碗|盘|杯子|筷子|勺子|叉子|刀具|砧板|锅|壶|餐垫|餐具|厨具|料理|烘焙|量杯|打蛋器|滤网|水杯|马克杯|保温杯|餐盘|饭碗|汤碗/,
-    productPattern: /碗|盘|杯|筷子|勺|叉|刀|砧板|锅|壶|餐垫|餐具|厨具|料理|烘焙|量杯|打蛋器|滤网|水杯|马克杯|保温杯|餐盘|饭碗|汤碗|bowl|plate|cup|chopstick|spoon|fork|knife|cutting board|pot|pan|kettle|baking|cooking|kitchenware|tableware|dinnerware|容器|保存|保鲜|密封|便当|餐盒|收纳盒|调料|调味|漏勺|汤勺|锅铲|刮铲|滤网|筛网|厨房/,
-    excludeProductPattern: /电视|电脑|手机|沙发|床/,
+    productPattern: /碗|盘|杯|筷子|勺|叉|刀|砧板|锅|壶|餐垫|餐具|厨具|料理|烘焙|量杯|打蛋器|滤网|水杯|马克杯|保温杯|餐盘|饭碗|汤碗|bowl|plate|cup|chopstick|spoon|fork|knife|cutting board|pot|pan|kettle|baking|cooking|kitchenware|tableware|dinnerware|容器|保存|保鲜|密封|便当|餐盒|收纳盒|调料|调味|漏勺|汤勺|锅铲|刮铲|滤网|筛网/,
+    excludeProductPattern: /电视|电脑|手机|沙发|床|货盘|电视柜|收纳柜|书桌|办公桌|desk|table|cabinet|storage unit|shelf/,
     promptTerms: ['碗', '盘', '杯子', '筷子', '餐具', '厨具', '烘焙', '水杯', '餐盘', '容器', '保鲜'],
   },
 
@@ -380,6 +380,9 @@ const intentFamilyMap: Record<string, ProductFamily> = {
 }
 
 const _rawTextCache = new Map<string, string>()
+
+const GENERIC_META_TAGS = new Set(['真实货盘', '官方商品', '精选商品'])
+
 export function getRawProductText(product: CatalogProduct) {
   const key = product.id || product.name
   let cached = _rawTextCache.get(key)
@@ -387,16 +390,16 @@ export function getRawProductText(product: CatalogProduct) {
   cached = normalizeText([
     product.name,
     product.brand,
-    product.category,
+    product.category === '精选商品' ? '' : product.category,
     product.materials,
     product.feature,
     product.craftsmanship,
     product.benefit,
     product.pairing_note,
     ...product.keywords,
-    ...product.style_tags,
+    ...product.style_tags.filter((t) => !GENERIC_META_TAGS.has(t)),
     ...product.room_tags,
-    ...product.scenarios,
+    ...product.scenarios.filter((t) => !GENERIC_META_TAGS.has(t)),
   ].join(' '))
   _rawTextCache.set(key, cached)
   return cached
