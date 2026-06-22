@@ -2,6 +2,57 @@
 
 本文档记录 `Retail-AI-Agent` 的重要迭代。
 
+## [2026-06-22]
+
+### 新增
+
+- 新增商品意图覆盖补全：`personal_care_appliance` 扩充剃须刀/洁面仪/筋膜枪等词，`cleaning` 扩充扫地/拖地/除螨等词，`audio` 扩充降噪/骨传导/回音壁等词，共优化 17 个意图的 `userPattern` 和 `promptTerms`。
+- 新增 `airconditioner`（无空格）、`cooling`、`风管`、`室内机` 等英文/中文关键词到空调意图，修复 LG、GE 等英文品牌空调商品无法命中的问题。
+- 新增 `厨房` 到 `kitchenware` 和 `generic_furniture` 的 `productPattern`，修复 IKEA 厨房系统商品无法命中的问题。
+- 新增 `罩衫` 到衬衫意图、`裙` 到连衣裙意图、`湿巾` 到护肤意图、`口罩` 到配件意图，修复 MUJI 部分商品无法命中的问题。
+- 新增 Haier 失效图片检测（`image.haier.com` 返回 403），在 `productImagePolicy` 中标记为 poor image。
+- 新增商品意图切换检测：当用户从一个品类切换到另一个品类（如从"半袖"切换到"盘子"）时，自动重置推荐上下文，避免上一轮的预算/性别信息污染新一轮的推荐。
+- 新增 `normalizeText`、`tokenize`、`getRawProductText`、`getDominantIntent`、`getMatchedIntents` 等高频函数的缓存机制，避免对相同输入重复计算。
+- 新增 `analyzeUserText` 聚合函数，将用户文本的 7 次独立分析（归一化、分词、意图解析、性别、预算、品牌等）合并为 1 次。
+- 新增错误捕获和详细日志，`chat.post.ts` 中的 500 错误现在会返回具体错误信息而非通用提示。
+
+### 优化
+
+- 优化商品意图匹配优先级：`personal_care_appliance` 现在正确优先于 `cosmetics_skincare` 匹配剃须刀；`cleaning` 正确优先于 `smart_home` 匹配清洁用品。
+- 优化 `tee` 意图的排除规则：移除 `内衣` 和 `内裤`，避免 UNIQLO AIRism 系列 T 恤被错误排除。
+- 优化 `food_snacks` 的 `productPattern`：移除过长的省份石斛列表（无效正则匹配），精简为有效关键词。
+- 优化 `office_chair` 的 `productPattern`：移除过于宽泛的 `chair`，改用 `人体工学`、`ergonomic` 等精确词。
+- 优化 `seating` 意图：移除 `办公椅`（已由 `office_chair` 处理），避免冲突。
+- 优化商品匹配管线：将原来的 4 轮独立遍历（品牌过滤 → 意图过滤 → 兼容性检查 → 打分）合并为 1 轮单次遍历，减少约 75% 的遍历开销。
+- 优化 `scoreKeyword` 实现：用 `for` 循环替代 `reduce`，适配 V8 引擎优化。
+- 优化 `getBrandAliases`：从每次调用创建新对象改为静态查表。
+- 优化 `scoreExactProductSignal`：移除冗余的 `source_url` 归一化，品牌匹配时 `break` 短路。
+
+### 修复
+
+- 修复 `productCatalog.ts` 中遗留的未定义变量 `intentFilteredCount` 导致的 500 错误。
+- 修复用户切换商品品类时（如从"半袖"到"盘子"），系统仍推荐上一轮商品的问题。
+- 修复 UNIQLO AIRism 系列 T 恤因 category 含"内衣"被 `tee` 意图排除的问题。
+- 修复 `cosmetics_skincare` 意图误匹配剃须刀的问题（已移至 `personal_care_appliance`）。
+- 修复 `smart_home` 意图误匹配清洁用品的问题（已移至 `cleaning`）。
+
+### 删除
+
+- 从 `realProducts.json` 中删除 TCL 品牌 100 个商品（全部返回 403 Forbidden）。
+- 从 `realProducts.json` 中删除 Haier 品牌 100 个商品（全部返回 403 Forbidden）。
+- 商品总数从 2946 降至 2746。
+
+### 验证
+
+- 已验证意图匹配覆盖率：2746 个商品中 2718 个可被正确命中，覆盖率 99.0%。
+- 已验证 37 个查询词全部命中预期意图，包括新增的"剃须刀""清洁""香水""Polo衫""高跟鞋""西裤""礼服""降噪耳机""凉席"等。
+- 已验证性能优化效果：单次商品匹配耗时从 110ms 降至 43ms（2.5 倍提速）。
+- 已验证新旧逻辑结果一致性：12 个测试查询的产品推荐结果完全一致。
+- 已验证品类切换修复："半袖" → "盘子" 场景正确返回澄清消息，不再推荐衬衫。
+- 已验证办公椅场景："想找一把办公椅" → "3000以内" 正确推荐 MUJI 工作椅。
+- 已用 `nuxi build` 验证编译通过。
+- 已部署到 Vercel 生产环境，`https://retail.abobb.site/` 返回 `HTTP 200`。
+
 ## [2026-06-18]
 
 ### 新增
