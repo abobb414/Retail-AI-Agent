@@ -1,3 +1,4 @@
+import { getDominantIntent } from '../utils/catalogIntents'
 import { pickProductRecommendation } from '../utils/productCatalog'
 import { getRecommendationClarificationMessage, wantsProductRecommendation } from '../utils/recommendationSlots'
 
@@ -33,6 +34,22 @@ function getRecentUserContext(messages: IncomingMessage[]) {
     .join('；')
 }
 
+function getRecommendationContext(messages: IncomingMessage[]) {
+  const fullContext = getRecentUserContext(messages)
+  const latestText = getLatestUserText(messages)
+
+  // If the latest message has a different product intent than the full context,
+  // use only the latest message to avoid contaminating with previous requests
+  const latestIntent = getDominantIntent(latestText)
+  const fullIntent = getDominantIntent(fullContext)
+
+  if (latestIntent && fullIntent && latestIntent.id !== fullIntent.id) {
+    return latestText
+  }
+
+  return fullContext
+}
+
 function writeEvent(event: H3Event, name: string, data: unknown) {
   event.node.res.write(`event: ${name}\n`)
   event.node.res.write(`data: ${JSON.stringify(data)}\n\n`)
@@ -53,7 +70,7 @@ export default defineEventHandler(async (event) => {
   const apiKey = config.deepseekApiKey
   const messages = body.messages ?? []
   const latestUserText = getLatestUserText(messages)
-  const recommendationContext = getRecentUserContext(messages)
+  const recommendationContext = getRecommendationContext(messages)
   const clientDirective = body.clientDirective?.trim()
   const hasRecommendationIntent = wantsProductRecommendation(recommendationContext)
   const clarificationMessage = hasRecommendationIntent
