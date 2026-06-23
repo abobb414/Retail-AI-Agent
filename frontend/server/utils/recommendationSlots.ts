@@ -14,7 +14,7 @@ function hasFurnitureContextSignal(text: string) {
 }
 
 function hasApplianceContextSignal(text: string) {
-  return /面积|平米|㎡|几口人|容量|升|l\b|安装|预留|嵌入|台式|独立式|能效|一级|二级|变频|制冷|制热|除湿|洗烘|烘干|游戏|观影|客厅|卧室|厨房/.test(text)
+  return /面积|平米|㎡|几口人|容量|升|l\b|安装|预留|嵌入|台式|独立式|能效|一级|二级|变频|制冷|制热|除湿|洗烘|烘干|游戏|观影|客厅|卧室|厨房|面包机|吐司|烤箱|微波炉|咖啡机|洗碗机|电饭煲|热水壶|搅拌机|榨汁机|空气炸锅/.test(text)
 }
 
 function hasLightingContextSignal(text: string) {
@@ -81,6 +81,13 @@ const slotRequirementsByFamily: Record<ProductFamily, SlotRequirement[]> = {
       isSatisfied: hasBudgetSignal,
     },
   ],
+  misc: [
+    {
+      id: 'budget',
+      label: '预算',
+      isSatisfied: hasBudgetSignal,
+    },
+  ],
 }
 
 function getMissingSlotRequirements(text: string) {
@@ -104,6 +111,9 @@ function getClarificationPrefix(family: ProductFamily) {
   }
   if (family === 'tableware') {
     return '可以，餐具这块我先把预算确认一下。'
+  }
+  if (family === 'misc') {
+    return '可以，我先确认一下预算。'
   }
   return '可以，灯具先看使用位置和预算。'
 }

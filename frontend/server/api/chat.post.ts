@@ -25,19 +25,10 @@ function getLatestUserText(messages: IncomingMessage[]) {
     ?.content ?? ''
 }
 
-function getRecentUserContext(messages: IncomingMessage[]) {
-  return messages
-    .filter((message) => message.role === 'user')
-    .slice(-6)
-    .map((message) => message.content.trim())
-    .filter(Boolean)
-    .join('；')
-}
-
 function getRecommendationContext(messages: IncomingMessage[]) {
   const userMessages = messages.filter((m) => m.role === 'user')
   if (userMessages.length <= 1) {
-    return getRecentUserContext(messages)
+    return userMessages.map((m) => m.content.trim()).filter(Boolean).join('；')
   }
 
   const latestText = userMessages[userMessages.length - 1].content.trim()
@@ -47,8 +38,6 @@ function getRecommendationContext(messages: IncomingMessage[]) {
     .filter(Boolean)
     .join('；')
 
-  // If the latest message contains a clear product intent that's different
-  // from the previous context, use only the latest message
   const latestIntent = getDominantIntent(latestText)
   const previousIntent = getDominantIntent(previousContext)
 
@@ -56,13 +45,11 @@ function getRecommendationContext(messages: IncomingMessage[]) {
     return latestText
   }
 
-  // Also: if latest message is a standalone product request (short, contains
-  // a product keyword like 盘子/碗/鞋/衣服 etc.), don't inherit old context
   if (latestIntent && latestText.length < 30 && !/预算|价格|\d{2,6}\s*(元|块)/.test(latestText)) {
     return latestText
   }
 
-  return getRecentUserContext(messages)
+  return userMessages.slice(-6).map((m) => m.content.trim()).filter(Boolean).join('；')
 }
 
 function writeEvent(event: H3Event, name: string, data: unknown) {
@@ -70,13 +57,8 @@ function writeEvent(event: H3Event, name: string, data: unknown) {
   event.node.res.write(`data: ${JSON.stringify(data)}\n\n`)
 }
 
-function getNoProductMessage(text: string) {
-  const compactText = text.replace(/\s+/g, '')
-  if (/小米|米家|xiaomi|redmi|红米/.test(compactText) && /灯|台灯|照明|lamp|light/.test(compactText)) {
-    return '我这边暂时没有能和这个灯具需求对应的小米商品卡，所以先不硬推荐。你可以换成「小米电视/空调/冰箱/耳机」这类库里有清晰商品图和详情的品类，或者继续看宜家/MUJI 的灯具方向。'
-  }
-
-  return '这次我没有在商品库里锁到足够可靠的具体商品，所以先不硬推。你可以补一句品牌、预算、性别/尺码或更具体的品类，我再给你一张能展示商品图和官网链接的卡片。'
+function getNoProductMessage(_text: string) {
+  return '抱歉，目前商品库中没有找到符合条件的商品，暂时无法为您推荐。您可以换个品类或补充更多需求信息，我再帮您看看。'
 }
 
 export default defineEventHandler(async (event) => {

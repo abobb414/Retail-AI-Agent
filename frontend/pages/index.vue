@@ -1,7 +1,7 @@
 <template>
   <div class="chat-page flex min-h-[100dvh] items-start justify-center px-0 py-0 sm:px-6 sm:py-6 lg:py-8">
-    <div class="chat-shell mx-auto flex h-[100dvh] w-full max-w-6xl flex-col overflow-hidden bg-white/52 shadow-[0_40px_100px_rgba(86,119,153,0.16)] backdrop-blur-[24px] sm:h-[min(88vh,920px)] sm:rounded-[36px]">
-      <header class="shell-header flex flex-wrap items-center justify-between gap-3 px-5 py-4 sm:px-8 sm:py-5">
+    <div class="chat-shell mx-auto flex h-[100dvh] w-full max-w-6xl flex-col overflow-hidden bg-white/52 shadow-[0_40px_100px_rgba(86,119,153,0.16)] backdrop-blur-[24px] sm:h-[min(88vh,920px)] sm:rounded-[36px]" :class="{ 'entrance': entranceActive }">
+      <header class="shell-header flex flex-wrap items-center justify-between gap-3 px-5 py-4 sm:px-8 sm:py-5 entrance-header">
         <div class="brand-lockup">
           <p class="wordmark" aria-label="Retail AI Agent">
             <span class="wordmark-retail">Retail</span>
@@ -19,19 +19,21 @@
         </div>
       </header>
 
-      <div class="grid min-h-0 flex-1 overflow-hidden lg:grid-cols-[minmax(0,1.22fr)_minmax(280px,0.78fr)]">
+      <div class="grid min-h-0 flex-1 overflow-hidden lg:grid-cols-[minmax(0,1.22fr)_minmax(280px,0.78fr)] entrance-body">
         <MessageList :messages="messages" />
-        <StatusPanel class="hidden lg:flex" :active-recommendation="activeRecommendation" :profile-summary="profileSummary" />
+        <StatusPanel class="hidden lg:flex entrance-sidebar" :active-recommendation="activeRecommendation" :profile-summary="profileSummary" />
       </div>
 
-      <footer class="shell-footer px-4 py-4 sm:px-6 sm:py-6">
+      <footer class="shell-footer px-4 py-4 sm:px-6 sm:py-6 entrance-footer">
         <div class="mx-auto w-full max-w-4xl">
           <div v-if="messages.length === 1" class="mb-3 flex flex-wrap gap-2">
             <button
-              v-for="prompt in quickPrompts"
+              v-for="(prompt, i) in quickPrompts"
               :key="prompt"
               type="button"
-              class="quick-prompt rounded-full border border-white/70 bg-white/65 px-4 py-2 text-sm font-medium text-slate-500 shadow-[0_12px_28px_rgba(130,145,160,0.10)] transition hover:-translate-y-0.5 hover:bg-white/82 hover:text-slate-600 disabled:cursor-not-allowed disabled:opacity-50"
+              class="quick-prompt rounded-full border border-white/70 bg-white/65 px-4 py-2 text-sm font-medium text-slate-500 shadow-[0_12px_28px_rgba(130,145,160,0.10)] transition hover:-translate-y-0.5 hover:bg-white/82 hover:text-slate-600 disabled:cursor-not-allowed disabled:opacity-50 entrance-prompt"
+              :class="{ 'entrance-prompt-visible': entranceActive }"
+              :style="{ '--prompt-delay': `${0.34 + i * 0.06}s` }"
               :disabled="isStreaming"
               @click="sendMessage(prompt)"
             >
@@ -42,6 +44,7 @@
             v-model="draft"
             :auto-focus-on-enable="!activeRecommendation"
             :disabled="isStreaming"
+            class="entrance-input"
             @submit="sendMessage"
           />
         </div>
@@ -61,6 +64,13 @@ const {
   quickPrompts,
   sendMessage,
 } = useChat()
+
+const entranceActive = ref(false)
+onMounted(() => {
+  requestAnimationFrame(() => {
+    entranceActive.value = true
+  })
+})
 </script>
 
 <style scoped>
@@ -127,5 +137,101 @@ const {
 
 .quick-prompt {
   backdrop-filter: blur(18px);
+}
+
+/* ── Entrance animation ────────────────────────────── */
+
+.entrance {
+  animation: entrance-shell 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.entrance .entrance-header {
+  opacity: 0;
+  animation: entrance-header 0.38s cubic-bezier(0.22, 1, 0.36, 1) 0.12s both;
+}
+
+.entrance .entrance-body {
+  opacity: 0;
+  animation: entrance-fade 0.4s ease 0.18s both;
+}
+
+.entrance .entrance-sidebar {
+  opacity: 0;
+  animation: entrance-sidebar 0.42s cubic-bezier(0.22, 1, 0.36, 1) 0.26s both;
+}
+
+.entrance .entrance-footer {
+  opacity: 0;
+  animation: entrance-footer 0.4s cubic-bezier(0.22, 1, 0.36, 1) 0.22s both;
+}
+
+.entrance-prompt {
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  transition-delay: var(--prompt-delay, 0.34s);
+}
+
+.entrance-prompt.entrance-prompt-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.entrance .entrance-input {
+  opacity: 0;
+  animation: entrance-footer 0.38s cubic-bezier(0.22, 1, 0.36, 1) 0.3s both;
+}
+
+@keyframes entrance-shell {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes entrance-header {
+  from {
+    opacity: 0;
+    transform: translateY(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes entrance-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes entrance-sidebar {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes entrance-footer {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 </style>

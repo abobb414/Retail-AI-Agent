@@ -2,37 +2,48 @@ import type { CatalogProduct, ProductFamily } from './catalogTypes'
 import { getRequestedProductFamily, getRawProductText } from './catalogIntents'
 import { getBrandAliases, normalizeText } from './catalogText'
 
+export const BRAND_GROUPS: string[][] = [
+  ['uniqlo', '优衣库'],
+  ['lululemon', '露露乐蒙'],
+  ['muji', '无印良品'],
+  ['ikea', '宜家'],
+  ['xiaomi', '小米', '米家', 'redmi', '红米'],
+  ['adidas', '阿迪达斯'],
+  ['nike', '耐克'],
+]
+
+const _familyCache = new Map<string, boolean>()
 export function isProductInFamily(product: CatalogProduct, family: ProductFamily) {
+  const cacheKey = product.id + '|' + family
+  const cached = _familyCache.get(cacheKey)
+  if (cached !== undefined) return cached
+
   const productText = getRawProductText(product)
   const productName = normalizeText(product.name)
+  let result: boolean
 
   if (family === 'apparel') {
-    return /服饰|女装|男装|童装|衣服|上衣|t恤|半袖|短袖|衬衫|衬衣|外套|夹克|裤|鞋|帽|背包|配件|tee|t shirt|t-shirt|shirt|jacket|coat|pants|trouser|shorts|sneaker|shoe|footwear|apparel|clothing/.test(productText)
+    result = /服饰|女装|男装|童装|衣服|上衣|t恤|半袖|短袖|衬衫|衬衣|外套|夹克|裤|鞋|袜|内衣|内裤|文胸|bra|睡衣|家居服|帽|背包|配件|裙|tee|t shirt|t-shirt|shirt|jacket|coat|pants|trouser|shorts|sneaker|shoe|sock|footwear|apparel|clothing/.test(productText)
       && !/家具|家居|沙发|床|椅|凳|桌|柜|家电|空调|冰箱|电视|洗衣机|office furniture|chair|sofa|bed|desk|table|cabinet|appliance/.test(productText)
-  }
-
-  if (family === 'furniture') {
-    return /家具|家居|沙发|床|椅|凳|桌|柜|收纳|置物|书房|客厅|卧室|office furniture|chair|sofa|bed|desk|table|cabinet|storage|shelf|wood-focused furniture/.test(productText)
+  } else if (family === 'furniture') {
+    result = /家具|家居|沙发|床|椅|凳|桌|柜|收纳|置物|书房|客厅|卧室|office furniture|chair|sofa|bed|desk|table|cabinet|storage|shelf|wood-focused furniture/.test(productText)
       && !/服饰|衣服|t恤|半袖|短袖|衬衫|裤|鞋|家电|空调|冰箱|电视|洗衣机/.test(productText)
-  }
-
-  if (family === 'appliance') {
-    return /家电|空调|冰箱|电视|显示器|洗衣机|烘干|厨电|洗碗机|烤箱|微波炉|air conditioner|refrigerator|fridge|washer|dryer|monitor|tv|dishwasher|oven|microwave|appliance|cooling/.test(productText)
+  } else if (family === 'appliance') {
+    result = /家电|空调|冰箱|电视|显示器|洗衣机|烘干|厨电|洗碗机|烤箱|微波炉|air conditioner|refrigerator|fridge|washer|dryer|monitor|tv|dishwasher|oven|microwave|appliance|cooling/.test(productText)
       && !/服饰|衣服|t恤|半袖|短袖|衬衫|裤|鞋|家具|沙发|床|椅|桌/.test(productText)
-  }
-
-  if (family === 'tableware') {
-    // Product name must contain a tableware keyword — prevents furniture
-    // whose description mentions "盘/杯" from matching
-    if (!/杯|碗|盘|筷|勺|叉|壶|餐垫|餐具|马克杯|保温杯|bowl|plate|cup|mug|chopstick|spoon|fork/.test(productName)) {
-      return false
-    }
-    return /杯|碗|盘|筷|勺|叉|壶|餐垫|餐具|厨具|马克杯|保温杯|餐盘|饭碗|汤碗|容器|便当|餐盒|bowl|plate|cup|mug|chopstick|spoon|fork|kitchenware|tableware|dinnerware/.test(productText)
+  } else if (family === 'tableware') {
+    result = /杯|碗|盘|筷|勺|叉|壶|餐垫|餐具|马克杯|保温杯|bowl|plate|cup|mug|chopstick|spoon|fork/.test(productName)
+      && /杯|碗|盘|筷|勺|叉|壶|餐垫|餐具|厨具|马克杯|保温杯|餐盘|饭碗|汤碗|容器|便当|餐盒|bowl|plate|cup|mug|chopstick|spoon|fork|kitchenware|tableware|dinnerware/.test(productText)
       && !/硬盘|键盘|鼠标|显示器|手机|电脑|笔记本|平板|电视|冰箱|空调|洗衣机|沙发|床|椅|桌|柜|世界杯|洗碗机|洗碗|盘扣|眼影|吸盘/.test(productText)
+  } else if (family === 'misc') {
+    result = true
+  } else {
+    result = /灯|台灯|落地灯|灯泡|照明|\blamp\b|\blight\b|\blantern\b/.test(productText)
+      && !/服饰|衣服|t恤|半袖|短袖|衬衫|裤|鞋|家具|沙发|床|椅|桌|家电|空调|冰箱|电视|furniture|chair|sofa|bed|headboard|desk|table|appliance/.test(productText)
   }
 
-  return /灯|台灯|落地灯|灯泡|照明|\blamp\b|\blight\b|\blantern\b/.test(productText)
-    && !/服饰|衣服|t恤|半袖|短袖|衬衫|裤|鞋|家具|沙发|床|椅|桌|家电|空调|冰箱|电视|furniture|chair|sofa|bed|headboard|desk|table|appliance/.test(productText)
+  _familyCache.set(cacheKey, result)
+  return result
 }
 
 export function isProductCompatibleWithRequest(product: CatalogProduct, text: string) {
@@ -80,9 +91,18 @@ export function getRequestedBudget(text: string) {
   return Number.isFinite(budget) ? budget : null
 }
 
+const _priceCache = new Map<string, number | null>()
 export function getProductCnyPrice(product: CatalogProduct) {
+  const cached = _priceCache.get(product.id)
+  if (cached !== undefined) return cached
   const cnyMatch = product.price_range.match(/CNY\s*([\d.]+)/i)
   const cnyPrice = Number(cnyMatch?.[1])
+
+  // USD → CNY (approx 7.2)
+  const usdMatch = product.price_range.match(/USD\s*([\d.]+)/i)
+  const usdPrice = Number(usdMatch?.[1])
+  const usdToCny = Number.isFinite(usdPrice) ? Math.round(usdPrice * 7.2) : null
+
   const productText = [
     product.name,
     product.price_range,
@@ -92,11 +112,17 @@ export function getProductCnyPrice(product: CatalogProduct) {
     .map((match) => Number(match[1]))
     .filter((price) => Number.isFinite(price))
 
+  let result: number | null = null
   if (yuanPrices.length) {
-    return Math.max(...yuanPrices)
+    result = Math.max(...yuanPrices)
+  } else if (Number.isFinite(cnyPrice) && cnyPrice >= 20) {
+    result = cnyPrice
+  } else if (usdToCny && usdToCny >= 20) {
+    result = usdToCny
   }
 
-  return Number.isFinite(cnyPrice) && cnyPrice >= 20 ? cnyPrice : null
+  _priceCache.set(product.id, result)
+  return result
 }
 
 export function isProductWithinBudget(product: CatalogProduct, text: string) {
@@ -115,17 +141,7 @@ export function isProductWithinBudget(product: CatalogProduct, text: string) {
 
 function getRequestedBrandAliases(text: string) {
   const normalizedText = normalizeText(text)
-  const brandGroups = [
-    ['uniqlo', '优衣库'],
-    ['lululemon', '露露乐蒙'],
-    ['muji', '无印良品'],
-    ['ikea', '宜家'],
-    ['xiaomi', '小米', '米家', 'redmi', '红米'],
-    ['adidas', '阿迪达斯'],
-    ['nike', '耐克'],
-  ]
-
-  return brandGroups.find((group) => group.some((brand) => normalizedText.includes(normalizeText(brand)))) ?? []
+  return BRAND_GROUPS.find((group) => group.some((brand) => normalizedText.includes(normalizeText(brand)))) ?? []
 }
 
 export function filterByRequestedBrand(products: CatalogProduct[], text: string) {
