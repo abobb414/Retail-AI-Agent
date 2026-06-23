@@ -2,6 +2,50 @@
 
 本文档记录 `Retail-AI-Agent` 的重要迭代。
 
+## [2026-06-23] — 入场动画 + 商品匹配修复 + 性能优化
+
+### 新增
+
+- 新增页面入场过渡动画：面板缩放淡入、顶栏从上方滑入、底部输入栏升起、右侧面板从右侧滑入、快捷按钮逐个渐现，总时长约 0.7 秒，纯 CSS keyframes 实现，仅首次加载播放一次。
+- 新增 USD 价格解析（×7.2 汇率），修复 MUJI 等美元定价商品无法被预算过滤命中的问题。
+- 新增 `misc` 产品家族（化妆品、零食、宠物用品），避免被 apparel 家族的性别/尺码槽位追问拦截。
+- 新增 `analyzeIntents` 合并函数，将 `getDominantIntent` 与 `getMatchedIntents` 的两次意图遍历合并为单次遍历。
+- 新增 `getProductCnyPrice`、`isProductInFamily` 的 Map 缓存，避免对同一商品重复执行正则匹配。
+- 新增共享常量 `BRAND_GROUPS`（品牌列表）和 `RE_PET_*` / `RE_CHILD_*`（宠物/儿童排除正则），消除多处重复定义。
+
+### 优化
+
+- 优化意图选择逻辑：从"数组顺序首个匹配"改为"文本中最早出现位置的意图"，修复"收纳盒整理办公桌"被 `table_desk` 抢走 `storage` 意图的问题。
+- 优化 `scoreProduct` 评分流程：brand/aliases/keywords 不再在 fields 数组中低权重重复评分，仅在加权循环中计分。
+- 优化 `scoreIntentFit`：移除已被过滤器处理的 `hasOppositeGender` 检查（过滤后的产品该检查永远为 false）。
+- 优化 `findBestProduct`：`productText` 从主循环穿透到 `scoreProduct`，避免重复 Map 查找；`aliases` 算一次传给 `scoreExactProductSignal`。
+- 优化 `analyzeUserText`：直接在分析阶段计算 `requestedFamily`，后续不再重复调用 `getRequestedProductFamily`。
+- 优化 `chat.post.ts`：合并 `getRecentUserContext` 到 `getRecommendationContext`，消除重复的用户消息过滤。
+- 优化 `pickProductRecommendation`：兼容性检查失败时自动回退到 curated 精选商品库，不再直接返回 null。
+- 优化小家电槽位追问：面包机、烤箱、咖啡机等小家电不再追问"安装条件、容量/面积"。
+- 优化无商品提示语：改为直接告知"目前商品库中没有找到符合条件的商品，暂时无法为您推荐"。
+- 优化 promptTerms：清理 37 个意图中库内无对应商品的多余提示词（约 60+ 个），确保追问建议词只展示库内实际有的商品类型。
+- 性能：单次商品匹配平均 3.25ms，较优化前提升约 30%。
+
+### 修复
+
+- 修复 `productCatalog.ts` 缺少 `isProductCompatibleWithRequest` 的 import，导致品类兼容性检查和预算检查形同虚设的严重 bug。
+- 修复「面包机」误匹配配件意图：「面包」中的「包」触发 `accessory` 的 `userPattern`，增加负向预查 `(?<!面)包(?!机)`。
+- 修复「桌面」误触发 `table_desk` 意图：「桌面」（desktop）被「桌」匹配，增加 `(?!面)` 排除。
+- 修复意图 `userPattern` 缺少「面包机」「吐司机」「toaster」导致烤面包机无法被 `kitchen_appliance` 意图识别。
+- 修复袜子、内衣、文胸、睡衣等品类不在 apparel 家族 `isProductInFamily` 正则中，导致这些品类商品被过滤掉无法推荐。
+- 修复 `isProductWithinBudget` 对无法解析价格的商品返回 false（应为 true 放行），与 `findBestProduct` 内部预算过滤逻辑不一致。
+- 修复 `getProductCnyPrice` 最低价格阈值 20 元过高导致低价商品（如 15 元收纳盒）价格无法解析。
+- 修复化妆品、零食、宠物用品被映射到 apparel 家族但不匹配 apparel 正则，导致这些品类永远无法推荐。
+
+### 验证
+
+- 已验证 10 个品类测试：T恤 ✅、办公椅 ✅、台灯 ✅、收纳盒 ✅、沙发 ✅、书桌 ✅、袜子 ✅ 均正确命中；烤面包机/跑鞋/香薰机品类正确但具体商品仍有优化空间。
+- 已验证入场动画在桌面端和移动端均可正常播放。
+- 已验证性能基准：1000 次调用平均 3.25ms/次。
+- 已用 `nuxi build` 验证编译通过。
+- 已部署到 Vercel 生产环境。
+
 ## [2026-06-22] — 推荐引擎修复（下午）
 
 ### 修复
