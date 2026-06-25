@@ -42,7 +42,7 @@ export const productIntents: ProductIntent[] = [
   // ── 鞋 ──
   {
     id: 'shoes',
-    userPattern: /鞋|鞋子|跑鞋|运动鞋|板鞋|登山鞋|徒步鞋|sneaker|shoe|高跟鞋|平底鞋|单鞋|皮鞋|帆布鞋|老爹鞋|凉鞋|拖鞋|靴|boot|sandal|slipper|乐福鞋|loafer|穆勒鞋|mule|德训鞋/,
+    userPattern: /鞋|鞋子|跑鞋|运动鞋|板鞋|登山鞋|徒步鞋|sneaker|shoe|一双|高跟鞋|平底鞋|单鞋|皮鞋|帆布鞋|老爹鞋|凉鞋|拖鞋|靴|boot|sandal|slipper|乐福鞋|loafer|穆勒鞋|mule|德训鞋/,
     productPattern: /鞋|sneaker|shoe|footwear|靴|boot|拖鞋|slipper|凉鞋|sandal|高跟|平底|单鞋|皮鞋|帆布|老爹鞋|乐福|loafer|穆勒|mule|德训/,
     promptTerms: ['鞋', '运动鞋', '跑鞋', '板鞋', '徒步鞋', '拖鞋', '凉鞋'],
   },
@@ -178,7 +178,7 @@ export const productIntents: ProductIntent[] = [
   // ── 餐具/厨具 ──
   {
     id: 'kitchenware',
-    userPattern: /碗|盘|杯子|筷子|勺子|叉子|刀具|砧板|锅|壶|餐垫|餐具|厨具|料理|烘焙|量杯|打蛋器|滤网|水杯|马克杯|保温杯|餐盘|饭碗|汤碗/,
+    userPattern: /(?<!洗)碗(?!机)|盘|杯子|筷子|勺子|叉子|刀具|砧板|(?<!洗碗)锅|壶|餐垫|餐具|厨具|料理|烘焙|量杯|打蛋器|滤网|水杯|马克杯|保温杯|餐盘|饭碗|汤碗/,
     productPattern: /碗|盘|杯|筷子|勺|叉|刀|砧板|锅|壶|餐垫|餐具|厨具|料理|烘焙|量杯|打蛋器|滤网|水杯|马克杯|保温杯|餐盘|饭碗|汤碗|bowl|plate|cup|chopstick|spoon|fork|knife|cutting board|pot|pan|kettle|baking|cooking|kitchenware|tableware|dinnerware|容器|保存|保鲜|密封|便当|餐盒|收纳盒|调料|调味|漏勺|汤勺|锅铲|刮铲|滤网|筛网/,
     excludeProductPattern: /电视|电脑|手机|沙发|床|货盘|电视柜|收纳柜|书桌|办公桌|desk|table|cabinet|storage unit|shelf/,
     promptTerms: ['碗', '盘', '杯子', '筷子', '餐具', '厨具', '水杯', '容器', '保鲜'],
@@ -430,6 +430,24 @@ function analyzeIntents(text: string): IntentAnalysis {
       if (match.index! < bestIndex) {
         bestIndex = match.index!
         dominant = intent
+      }
+    }
+  }
+
+  // Compound word override: prefer specific product type over generic category
+  // e.g. "鞋柜" → storage (not shoes), "书桌" → table_desk (not generic furniture)
+  if (dominant) {
+    const overrides: [RegExp, string][] = [
+      [/柜/, 'storage'],
+      [/桌/, 'table_desk'],
+      [/床(?!上)/, 'sofa_bed'],
+      [/灯/, 'lighting'],
+      [/碗|盘|杯|筷|勺/, 'kitchenware'],
+    ]
+    for (const [pattern, intentId] of overrides) {
+      if (pattern.test(normalizedText) && dominant.id !== intentId) {
+        const override = matched.find((i) => i.id === intentId)
+        if (override) { dominant = override; break }
       }
     }
   }

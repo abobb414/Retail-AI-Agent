@@ -32,24 +32,23 @@ function getRecommendationContext(messages: IncomingMessage[]) {
   }
 
   const latestText = userMessages[userMessages.length - 1].content.trim()
-  const previousContext = userMessages
-    .slice(-6, -1)
-    .map((m) => m.content.trim())
-    .filter(Boolean)
-    .join('；')
-
   const latestIntent = getDominantIntent(latestText)
-  const previousIntent = getDominantIntent(previousContext)
 
-  if (latestIntent && previousIntent && latestIntent.id !== previousIntent.id) {
-    return latestText
-  }
-
+  // If latest message has a new product intent, use it alone
   if (latestIntent && latestText.length < 30 && !/预算|价格|\d{2,6}\s*(元|块)/.test(latestText)) {
     return latestText
   }
 
-  return userMessages.slice(-6).map((m) => m.content.trim()).filter(Boolean).join('；')
+  // Find the first message with a product intent (the original request)
+  const firstIntentMessage = userMessages.find((m) => getDominantIntent(m.content.trim()))
+  const firstIntentText = firstIntentMessage?.content.trim() || ''
+
+  // Combine: first intent + latest context (avoid middle messages polluting intent)
+  const contextParts = [firstIntentText]
+  if (latestText !== firstIntentText) {
+    contextParts.push(latestText)
+  }
+  return contextParts.filter(Boolean).join('；')
 }
 
 function writeEvent(event: H3Event, name: string, data: unknown) {
@@ -70,7 +69,8 @@ export default defineEventHandler(async (event) => {
   const recommendationContext = getRecommendationContext(messages)
   const clientDirective = body.clientDirective?.trim()
   const hasRecommendationIntent = wantsProductRecommendation(recommendationContext)
-  const clarificationMessage = hasRecommendationIntent
+  const hasSpecificProductName = /跑鞋|跑步鞋|运动鞋|板鞋|香薰机|polo|沙发床|吸尘器|洗碗机|化妆包|挂衣架|拖鞋|手机壳|蜡烛|枕头|七分袖|背心|针织|卫衣|羽绒|内衣|裙|衬衫|柜|餐具|水壶|风扇|手表|耳机|刀|锅|牙刷|清洁|收纳箱|沙发|书桌|桌子|床|椅子|凳子|碗|马克杯|镜子|书架|鞋柜|衣柜|电视柜|收纳架|双人床|餐桌|面包机|台灯|咖啡机/.test(recommendationContext)
+  const clarificationMessage = hasRecommendationIntent && !hasSpecificProductName
     ? getRecommendationClarificationMessage(recommendationContext)
     : null
   const selectedProduct = hasRecommendationIntent && !clarificationMessage

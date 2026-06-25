@@ -14,7 +14,7 @@ const crawledProducts = (realProductsJson as { products: CatalogProduct[] }).pro
 const RE_PET_USER = /宠物|狗狗|猫咪/
 const RE_PET_PRODUCT = /宠物|狗狗|猫咪/
 const RE_CHILD_USER = /儿童|孩子|童|幼儿|大童|小童|婴童|宝宝|baby|infant|toddler|kids/
-const RE_CHILD_PRODUCT = /儿童|幼儿|婴童|宝宝|大童|小童|男童|女童|童装|baby|infant|toddler|kids/
+const RE_CHILD_PRODUCT = /儿童|幼儿|幼童|婴童|宝宝|大童|小童|男童|女童|童装|baby|infant|toddler|kids/
 
 // ── User text analysis (cached) ──
 interface UserTextAnalysis {
@@ -103,9 +103,14 @@ function scoreProduct(product: CatalogProduct, ctx: UserTextAnalysis, productTex
     score += scoreKeyword(aliases[i], ctx.normalizedText, ctx.tokens) * 8
   }
 
-  // Keywords with weight
+  // Keywords with weight + substring match in user query
   for (let i = 0; i < product.keywords.length; i++) {
     score += scoreKeyword(product.keywords[i], ctx.normalizedText, ctx.tokens) * 2
+    // If keyword is a substring of user query (e.g. "跑鞋" in "我想要一双跑鞋")
+    const nk = normalizeText(product.keywords[i])
+    if (nk.length >= 2 && ctx.normalizedText.includes(nk)) {
+      score += nk.length * 4
+    }
   }
 
   // Double-match boost: keyword in both user text and product name
@@ -114,6 +119,89 @@ function scoreProduct(product: CatalogProduct, ctx: UserTextAnalysis, productTex
     const nk = normalizeText(kw)
     if (nk.length >= 2 && ctx.normalizedText.includes(nk) && normalizedName.includes(nk)) {
       score += nk.length * 10
+    }
+  }
+
+  // Name-match boost: product name contains user's specific query terms
+  for (let i = 0; i < ctx.tokens.length; i++) {
+    const token = ctx.tokens[i]
+    if (token.length >= 2 && normalizedName.includes(token)) {
+      // Stronger boost when token appears at a word boundary (end of name or followed by space)
+      const pos = normalizedName.indexOf(token)
+      const atBoundary = pos >= 0 && (pos + token.length >= normalizedName.length || normalizedName[pos + token.length] === ' ')
+      score += token.length * (atBoundary ? 16 : 8)
+    }
+  }
+
+  // Subcategory boost: product's detected subcategory matches user query
+  const subCat = (product as any)._subCategory
+  if (subCat) {
+    const subCatNorm = normalizeText(subCat)
+    for (const token of ctx.tokens) {
+      if (token.length >= 2 && subCatNorm.includes(token)) {
+        score += 40
+        break
+      }
+    }
+    // Exact product type match: query token == subcategory → strong signal
+    for (const token of ctx.tokens) {
+      if (token.length >= 2 && subCatNorm === token) {
+        score += 60
+        break
+      }
+    }
+    // Also check if query term maps to subcategory
+    const subCatMappings: Record<string, string[]> = {
+      '椅凳': ['椅', '凳', 'chair', 'seat', 'stool'],
+      '沙发': ['沙发', 'sofa'],
+      '沙发床': ['沙发床'],
+      '桌子': ['桌', 'desk', 'table'],
+      '床/床架': ['床', 'bed', 'mattress'],
+      '柜架': ['柜', '架', 'shelf', 'cabinet'],
+      '收纳': ['收纳', '储物', '整理', 'storage'],
+      '灯具': ['灯', '灯具', '台灯', '落地灯', 'lamp', 'light'],
+      '餐具': ['餐具', '碗', '盘', '杯', 'dinnerware'],
+      '运动装备': ['运动鞋', '跑鞋', '板鞋', '跑步鞋'],
+      'T恤': ['t恤', 'tee'],
+      '衬衫': ['衬衫', 'shirt'],
+      '裤装': ['裤', 'pants', 'jeans'],
+      '裙装': ['裙', 'skirt', 'dress'],
+      '外套': ['外套', '夹克', 'jacket'],
+    }
+    const matchTerms = subCatMappings[subCat]
+    if (matchTerms) {
+      for (const term of matchTerms) {
+        if (ctx.normalizedText.includes(normalizeText(term))) {
+          score += 30
+          break
+        }
+      }
+    }
+  }
+
+  // Subcategory mismatch penalty: product's category doesn't match query intent
+  if (ctx.dominantIntent) {
+    const intentToExpectedSubCat: Record<string, string[]> = {
+      table_desk: ['桌子'],
+      seating: ['椅凳'],
+      office_chair: ['椅凳'],
+      sofa_bed: ['沙发', '沙发床'],
+      storage: ['收纳', '柜架'],
+      lighting: ['灯具'],
+      kitchenware: ['餐具', '锅具', '刀具', '水壶'],
+      shoes: ['运动装备'],
+      tee: ['T恤'],
+      shirt: ['衬衫'],
+      pants: ['裤装'],
+      dress: ['裙装'],
+    }
+    const expected = intentToExpectedSubCat[ctx.dominantIntent.id]
+    if (expected) {
+      if (!subCat) {
+        score -= 30 // No subcategory tag → slight penalty when intent is clear
+      } else if (!expected.includes(subCat)) {
+        score -= 50 // Wrong subcategory → bigger penalty
+      }
     }
   }
 
@@ -169,7 +257,8 @@ function pickFromRelevantPool(scoredProducts: ScoredProduct[], ctx: UserTextAnal
   if (bestMatch.exactScore >= 180) return bestMatch
 
   const topScore = bestMatch.score
-  const floorScore = Math.max(6, topScore - 16, topScore * 0.92)
+  // Tighter threshold: only include products within 5% or 8 points of the top score
+  const floorScore = Math.max(6, topScore - 8, topScore * 0.95)
   const relevantPool = scoredProducts
     .filter((c) => c.score >= floorScore)
     .slice(0, 48)
@@ -243,16 +332,22 @@ export function pickProductRecommendation(text: string) {
   if (shouldClarifyBeforeRecommendation(text)) return null
 
   const bestCrawled = findBestProduct(crawledProducts, text)
-  let selectedMatch = bestCrawled && bestCrawled.score >= 6
-    ? bestCrawled
-    : findBestProduct(curatedProducts, text)
+  const bestCurated = findBestProduct(curatedProducts, text)
+
+  // Pick the better match across both pools
+  let selectedMatch = bestCrawled
+  if (bestCurated && (!selectedMatch || bestCurated.score > selectedMatch.score)) {
+    selectedMatch = bestCurated
+  }
 
   if (!selectedMatch || selectedMatch.score < 6) return null
 
-  // If best crawled fails compatibility, try curated (cached from previous call if same text)
+  // If best match fails compatibility, try the other pool
   if (!isProductCompatibleWithRequest(selectedMatch.product, text)) {
-    selectedMatch = findBestProduct(curatedProducts, text)
-    if (!selectedMatch || selectedMatch.score < 6 || !isProductCompatibleWithRequest(selectedMatch.product, text)) {
+    const fallback = selectedMatch === bestCrawled ? bestCurated : bestCrawled
+    if (fallback && fallback.score >= 6 && isProductCompatibleWithRequest(fallback.product, text)) {
+      selectedMatch = fallback
+    } else {
       return null
     }
   }

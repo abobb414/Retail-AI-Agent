@@ -18,7 +18,20 @@ export function tokenize(text: string) {
   let cached = _tokenizeCache.get(key)
   if (cached !== undefined) return cached
   if (_tokenizeCache.size > 10000) _tokenizeCache.clear()
-  cached = key.split(' ').filter((token) => token.length >= 2)
+  const tokens = key.split(' ').filter((token) => token.length >= 2)
+  // Chinese bigram extraction: for tokens with Chinese chars, extract 2-char substrings
+  const bigrams = new Set(tokens)
+  for (const token of tokens) {
+    if (token.length > 2 && /[一-鿿]/.test(token)) {
+      for (let i = 0; i <= token.length - 2; i++) {
+        const bigram = token.slice(i, i + 2)
+        if (/[一-鿿]{2}/.test(bigram)) {
+          bigrams.add(bigram)
+        }
+      }
+    }
+  }
+  cached = [...bigrams]
   _tokenizeCache.set(key, cached)
   return cached
 }
@@ -36,6 +49,11 @@ export function scoreKeyword(keyword: string, text: string, tokens: string[]) {
   const keywordTokens = tokenize(normalizedKeyword)
   if (!keywordTokens.length) {
     return 0
+  }
+
+  // Also check if the full text is a substring of the keyword (user query shorter than product field)
+  if (normalizedKeyword.includes(text) && text.length >= 2) {
+    return Math.max(6, text.length * 2)
   }
 
   let reverseScore = 0

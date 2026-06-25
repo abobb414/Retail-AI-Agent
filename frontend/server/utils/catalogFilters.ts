@@ -10,6 +10,13 @@ export const BRAND_GROUPS: string[][] = [
   ['xiaomi', '小米', '米家', 'redmi', '红米'],
   ['adidas', '阿迪达斯'],
   ['nike', '耐克'],
+  ['gree', '格力'],
+  ['samsung', '三星'],
+  ['lg', '乐金'],
+  ['bosch', '博世'],
+  ['panasonic', '松下'],
+  ['haier', '海尔'],
+  ['aux', '奥克斯'],
 ]
 
 const _familyCache = new Map<string, boolean>()
@@ -26,10 +33,10 @@ export function isProductInFamily(product: CatalogProduct, family: ProductFamily
     result = /服饰|女装|男装|童装|衣服|上衣|t恤|半袖|短袖|衬衫|衬衣|外套|夹克|裤|鞋|袜|内衣|内裤|文胸|bra|睡衣|家居服|帽|背包|配件|裙|tee|t shirt|t-shirt|shirt|jacket|coat|pants|trouser|shorts|sneaker|shoe|sock|footwear|apparel|clothing/.test(productText)
       && !/家具|家居|沙发|床|椅|凳|桌|柜|家电|空调|冰箱|电视|洗衣机|office furniture|chair|sofa|bed|desk|table|cabinet|appliance/.test(productText)
   } else if (family === 'furniture') {
-    result = /家具|家居|沙发|床|椅|凳|桌|柜|收纳|置物|书房|客厅|卧室|office furniture|chair|sofa|bed|desk|table|cabinet|storage|shelf|wood-focused furniture/.test(productText)
+    result = /家具|家居|沙发|床|椅|凳|桌|柜|收纳|置物|书房|客厅|卧室|蜡烛|香薰|装饰|地毯|窗帘|镜子|灯|lamp|light|office furniture|chair|sofa|bed|desk|table|cabinet|storage|shelf|wood-focused furniture/.test(productText)
       && !/服饰|衣服|t恤|半袖|短袖|衬衫|裤|鞋|家电|空调|冰箱|电视|洗衣机/.test(productText)
   } else if (family === 'appliance') {
-    result = /家电|空调|冰箱|电视|显示器|洗衣机|烘干|厨电|洗碗机|烤箱|微波炉|air conditioner|refrigerator|fridge|washer|dryer|monitor|tv|dishwasher|oven|microwave|appliance|cooling/.test(productText)
+    result = /家电|空调|冰箱|电视|显示器|洗衣机|烘干|厨电|洗碗机|烤箱|微波炉|数码|智能|吸尘器|净化器|加湿器|风扇|取暖器|air conditioner|refrigerator|fridge|washer|dryer|monitor|tv|dishwasher|oven|microwave|appliance|cooling/.test(productText)
       && !/服饰|衣服|t恤|半袖|短袖|衬衫|裤|鞋|家具|沙发|床|椅|桌/.test(productText)
   } else if (family === 'tableware') {
     result = /杯|碗|盘|筷|勺|叉|壶|餐垫|餐具|马克杯|保温杯|bowl|plate|cup|mug|chopstick|spoon|fork/.test(productName)
@@ -56,10 +63,10 @@ export function isProductCompatibleWithRequest(product: CatalogProduct, text: st
 }
 
 export function getGenderPreference(text: string) {
-  if (/男的|我是男|男士|男式|男子|男款|男生|男性|men|mens|man/.test(text)) {
+  if (/(?:^|[\s,，。！？])男(?:$|[\s,，。！？的式款生性])|我是男|男士|男式|男子|男款|男生|男性|men|mens|man/.test(text)) {
     return 'male'
   }
-  if (/女的|我是女|女士|女式|女子|女款|女生|女性|women|womens|woman/.test(text)) {
+  if (/(?:^|[\s,，。！？])女(?:$|[\s,，。！？的式款生性])|我是女|女士|女式|女子|女款|女生|女性|women|womens|woman/.test(text)) {
     return 'female'
   }
   return null
@@ -77,18 +84,26 @@ export function hasOppositeGender(productText: string, preference: 'male' | 'fem
 
 export function hasRequestedBrand(text: string) {
   const normalizedText = normalizeText(text)
-  return ['uniqlo', '优衣库', 'lululemon', '露露乐蒙', 'muji', '无印良品', 'ikea', '宜家', 'xiaomi', '小米', '米家', 'adidas', '阿迪达斯', 'nike', '耐克']
-    .some((brand) => normalizedText.includes(normalizeText(brand)))
+  return BRAND_GROUPS.some((group) =>
+    group.some((brand) => normalizedText.includes(normalizeText(brand)))
+  )
 }
 
 export function getRequestedBudget(text: string) {
-  const budgetMatch = text.match(/(?:预算|价格|价位)?\s*(\d{2,6})\s*(?:元|块|以内|以下|左右|上下)?/)
+  const budgetMatch = text.match(/(?:预算|价格|价位)?\s*(\d{2,6})\s*(元|块|以内|以下|左右|上下)?/)
   if (!budgetMatch) {
     return null
   }
 
   const budget = Number(budgetMatch[1])
-  return Number.isFinite(budget) ? budget : null
+  if (!Number.isFinite(budget)) return null
+
+  // "左右" or "上下" → ±50% flexibility
+  const suffix = budgetMatch[2]
+  if (suffix === '左右' || suffix === '上下') {
+    return Math.round(budget * 1.5)
+  }
+  return budget
 }
 
 const _priceCache = new Map<string, number | null>()
@@ -133,6 +148,10 @@ export function isProductWithinBudget(product: CatalogProduct, text: string) {
 
   const price = getProductCnyPrice(product)
   if (!price) {
+    // If user specified a brand, allow products with unknown price
+    if (hasRequestedBrand(text)) {
+      return true
+    }
     return false
   }
 
