@@ -59,8 +59,8 @@ export const productIntents: ProductIntent[] = [
   {
     id: 'lighting',
     userPattern: /灯|台灯|落地灯|灯泡|照明|lamp|light|吊灯|壁灯|吸顶灯|射灯|筒灯|灯带|夜灯|氛围灯|led灯/,
-    productPattern: /灯|台灯|落地灯|灯泡|照明|lamp|light|lantern|吊灯|壁灯|吸顶灯|射灯|筒灯|灯带|夜灯|氛围灯|led灯/,
-    requireProductPattern: /灯|台灯|落地灯|灯泡|照明|lamp|light|lantern|吊灯|壁灯|吸顶灯|射灯|筒灯|灯带|夜灯|氛围灯|led灯/,
+    productPattern: /灯|台灯|落地灯|灯泡|照明|lamp|lantern|吊灯|壁灯|吸顶灯|射灯|筒灯|灯带|夜灯|氛围灯|led灯/,
+    requireProductPattern: /灯|台灯|落地灯|灯泡|照明|lamp|lantern|吊灯|壁灯|吸顶灯|射灯|筒灯|灯带|夜灯|氛围灯|led灯/,
     excludeProductPattern: /服饰|鞋|裤|t恤|电视|显示器|手环|耳机|手机|平板|电脑/,
     promptTerms: ['台灯', '灯具', '照明', '灯泡', '阅读灯', '落地灯', '吊灯', '氛围灯'],
   },
@@ -87,7 +87,7 @@ export const productIntents: ProductIntent[] = [
   // ── 沙发/床/床垫 ──
   {
     id: 'sofa_bed',
-    userPattern: /沙发|沙发床|床|床垫|sofa|bed|mattress/,
+    userPattern: /沙发|沙发床|床垫|床(?!头|品|单|笠|罩|裙|架|上)|sofa|mattress|\bbed\b/,
     productPattern: /沙发|床|床垫|sofa|bed|mattress|坐卧两用/,
     excludeProductPattern: /服饰|短袖|t恤|鞋|家电/,
     promptTerms: ['沙发', '沙发床', '床', '床垫', '卧室', '客厅', '小户型'],
@@ -461,7 +461,7 @@ function analyzeIntents(text: string): IntentAnalysis {
     const overrides: [RegExp, string][] = [
       [/柜/, 'storage'],
       [/桌/, 'table_desk'],
-      [/床(?!上)/, 'sofa_bed'],
+      [/床(?!上|头|品|单|笠|垫|罩|裙|架)/, 'sofa_bed'],
       [/灯/, 'lighting'],
       [/碗|盘|杯|筷|勺/, 'kitchenware'],
     ]

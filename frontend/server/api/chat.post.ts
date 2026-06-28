@@ -1,6 +1,6 @@
 import { getDominantIntent } from '../utils/catalogIntents'
 import { pickProductRecommendation } from '../utils/productCatalog'
-import { getRecommendationClarificationMessage, wantsProductRecommendation } from '../utils/recommendationSlots'
+import { getRecommendationClarificationMessage, shouldClarifyBeforeRecommendation, wantsProductRecommendation } from '../utils/recommendationSlots'
 
 interface IncomingMessage {
   role: 'assistant' | 'user'
@@ -69,8 +69,11 @@ export default defineEventHandler(async (event) => {
   const recommendationContext = getRecommendationContext(messages)
   const clientDirective = body.clientDirective?.trim()
   const hasRecommendationIntent = wantsProductRecommendation(recommendationContext)
-  const hasSpecificProductName = /跑鞋|跑步鞋|运动鞋|板鞋|香薰机|polo|沙发床|吸尘器|洗碗机|化妆包|挂衣架|拖鞋|手机壳|蜡烛|枕头|七分袖|背心|针织|卫衣|羽绒|内衣|裙|衬衫|柜|餐具|水壶|风扇|手表|耳机|刀|锅|牙刷|清洁|收纳箱|沙发|书桌|桌子|床|椅子|凳子|碗|马克杯|镜子|书架|鞋柜|衣柜|电视柜|收纳架|双人床|餐桌|面包机|台灯|咖啡机/.test(recommendationContext)
-  const clarificationMessage = hasRecommendationIntent && !hasSpecificProductName
+
+  // Use full conversation text for clarification check (includes latest user context like "男", "300以内")
+  const fullUserText = messages.filter((m) => m.role === 'user').map((m) => m.content.trim()).join('；')
+  const skipClarification = hasRecommendationIntent && !shouldClarifyBeforeRecommendation(fullUserText)
+  const clarificationMessage = hasRecommendationIntent && !skipClarification
     ? getRecommendationClarificationMessage(recommendationContext)
     : null
   const selectedProduct = hasRecommendationIntent && !clarificationMessage

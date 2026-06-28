@@ -402,6 +402,8 @@ function findBestFromIndex(text: string) {
   const requestedBrandNorms = requestedBrandGroup?.map((b) => normalizeText(b))
 
   // Build candidate set via inverted index when tokens exist, else scan all
+  // Only use when the intent-related token has enough hits (avoids false narrowing
+  // when e.g. "半袖" returns 0 but "男士" returns 48 unrelated products)
   let candidateIndices: Set<number> | null = null
   if (ctx.tokens.length > 0) {
     candidateIndices = new Set<number>()
@@ -411,8 +413,8 @@ function findBestFromIndex(text: string) {
         for (const idx of hits) candidateIndices.add(idx)
       }
     }
-    // Fallback to full scan when inverted index produces too few candidates
-    if (candidateIndices.size < 8) candidateIndices = null
+    // Require enough candidates to avoid false narrowing
+    if (candidateIndices.size < 200) candidateIndices = null
   }
 
   // mainCategory pre-skip set (only when intent is clear)
@@ -543,6 +545,7 @@ function findBestProductFromCurated(text: string) {
     const productText = getRawProductText(product)
     const coreText = getCoreProductText(product)
     if (intent && !passIntentFilter(coreText, intent, ctx.normalizedText)) continue
+    if (ctx.requestedFamily && !isProductInFamily(product, ctx.requestedFamily as any)) continue
     if (hasOppositeGender(productText, ctx.genderPreference)) continue
     if (ctx.requestedFamily && !isProductInFamily(product, ctx.requestedFamily as any)) continue
 

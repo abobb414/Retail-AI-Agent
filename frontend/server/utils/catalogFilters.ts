@@ -45,8 +45,8 @@ export function isProductInFamily(product: CatalogProduct, family: ProductFamily
   } else if (family === 'misc') {
     result = true
   } else {
-    result = /灯|台灯|落地灯|灯泡|照明|\blamp\b|\blight\b|\blantern\b/.test(productText)
-      && !/服饰|衣服|t恤|半袖|短袖|衬衫|裤|鞋|家具|沙发|床|椅|桌|家电|空调|冰箱|电视|furniture|chair|sofa|bed|headboard|desk|table|appliance/.test(productText)
+    result = /灯|台灯|落地灯|灯泡|照明|\blamp\b|\blantern\b/.test(productText)
+      && !/服饰|衣服|t恤|半袖|短袖|衬衫|裤|鞋|家电|空调|冰箱|电视|洗衣机|appliance/.test(productText)
   }
 
   _familyCache.set(cacheKey, result)
