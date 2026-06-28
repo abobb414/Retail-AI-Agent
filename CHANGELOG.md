@@ -2,6 +2,47 @@
 
 本文档记录 `Retail-AI-Agent` 的重要迭代。
 
+## [2026-06-28] — 预计算索引 + 匹配准确率 + 多轮对话修复
+
+### 新增
+
+- 新增 `realProductsEnriched.json` 数据源接入：启动时合并 `_subCategory`（653 件商品补全）和 `_mainCategory`（2746 件全覆盖），用于意图过滤和评分加权。
+- 新增预计算商品索引：模块加载时一次性缓存 normalized name、keywords、brand aliases、productText、coreText、price、subCat、mainCat，每次请求从约 50,000 次 `normalizeText` 调用降到 0 次。
+- 新增倒排索引：按 keywords/brand/nameTokens 构建 token → product index 映射，用于候选集预筛。
+- 新增 `intentToExpectedMainCats` 映射表（30+ 品类意图 → 预期 mainCategory），无关品类快速跳过、相关品类加分 +35。
+- 新增 `getCoreProductText`：仅含 name/brand/category/keywords 的精简文本，用于意图过滤，排除 feature/benefit/pairing_note 的干扰。
+- 新增 `SUB_CAT_MAPPINGS` 和 `INTENT_TO_EXPECTED_SUB_CAT` 常量外提到模块顶层，消除 per-product 循环内的对象重建。
+
+### 优化
+
+- 优化 `chat.post.ts` 澄清逻辑：用 `shouldClarifyBeforeRecommendation(fullUserText)` 替代 `hasSpecificProductName` 正则，解决"半袖"等品类名不在正则中导致的追问死循环。
+- 优化 `storage` 意图的 `productPattern`：`收纳` 必须和后缀词（盒/箱/架/柜/筐/桶/袋/篮/屉）组合才通过，避免"线缆收纳"等偶然提及误匹配。
+- 优化 `lighting` 意图的 `productPattern` 和 `requireProductPattern`：移除 `light`（保留 `lantern`），避免 Samsung SKU 中的 "light blue"/"light gray" 误匹配灯具意图。
+- 优化 `sofa_bed` 意图的 `userPattern`：收紧为 `/床(?!头|品|单|笠|罩|裙|架|上)/`，排除"床头"（bedside）、"床品"（bedding）等复合词。
+- 优化 compound word override：同步收紧床的排除列表，避免"暖光台灯；床头用"中"床头"的"床"把 `lighting` 覆盖成 `sofa_bed`。
+- 优化 `isProductInFamily` 的 lighting 排除列表：移除"家具"，避免 BALMUDA 灯等家居灯具被误杀。
+- 优化 `recommendationSlots.ts`：`RE_STRONG_CONTEXT` 移除"台灯"（单独"台灯"不足以跳过追问），`hasLightingContextSignal` 加入"暖光/冷光/柔光/工作/书房"。
+- 优化 curated pool：补上缺失的品牌过滤，避免"宜家收纳柜"错误返回 MUJI 商品。
+- 优化 `matched_preferences`：用归一化值匹配但返回原始关键词，避免品牌名被小写（"Adidas" → "adidas"）和标点丢失（"深靛蓝/汉玉白" → "深靛蓝 汉玉白"）。
+- 优化倒排索引回退阈值：从 8 提高到 200，避免"半袖"返回 0 但"男士"返回 48 导致候选集过窄、漏扫真正匹配的商品。
+
+### 修复
+
+- 修复"宜家收纳柜"误匹配 BEKANT 书桌：书桌的 `feature` 含"线缆收纳"，`storage` 意图的 `productPattern` 过宽。改用 `coreText`（不含 feature/benefit/pairing_note）做意图过滤。
+- 修复"一盏暖光台灯"误匹配 Galaxy S22 Ultra LED 智能保护套：Samsung SKU 关键词含 "light gray"/"light blue" 匹配了 lighting 正则的 `light`。
+- 修复"给我推荐半袖→男士300以内"追问死循环：`hasSpecificProductName` 正则没有"半袖"，导致每次都跳过追问但信息不足。
+- 修复"暖光台灯+卧室"无法推荐灯具：`isProductInFamily` 的 lighting 排除列表含"家具"，BALMUDA 灯的 keywords 含"家具"被误杀。
+- 修复"暖光台灯；床头用"意图被覆盖为 `sofa_bed`：compound word override 的 `/床/` 匹配了"床头"中的"床"。
+- 修复 `getMatchedPreferences` 返回归一化后的关键词（小写、去标点），改为返回原始关键词。
+
+### 验证
+
+- 已验证 15 个查询测试：跑鞋 ✅、宜家书桌 ✅、小米空调 ✅、连衣裙 ✅、香薰机 ✅、洗碗机 ✅、收纳箱 ✅、Nike运动鞋 ✅、碗和盘子 ✅、鞋柜 ✅、半袖(追问) ✅、暖光台灯(追问) ✅。
+- 已验证多轮对话：半袖+男士300 → Nike T恤 ✅、暖光台灯+卧室 → BALMUDA 灯 ✅。
+- 已验证品牌过滤：宜家收纳柜 → 无匹配（数据缺口，非代码问题）✅。
+- 已用 `nuxi build` 验证编译通过。
+- 已部署到 Vercel 生产环境（retail.abobb.site）。
+
 ## [2026-06-23] — 入场动画 + 商品匹配修复 + 性能优化
 
 ### 新增
