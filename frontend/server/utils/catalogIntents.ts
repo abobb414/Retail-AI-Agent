@@ -106,7 +106,7 @@ export const productIntents: ProductIntent[] = [
   {
     id: 'storage',
     userPattern: /收纳|柜|衣柜|储物|整理|置物架|storage|cabinet|wardrobe/,
-    productPattern: /收纳|柜|储物|置物|架|storage|cabinet|wardrobe|shelf|斗柜|书柜|鞋柜|餐柜|电视柜|床头柜|衣柜|衣架|hanger/,
+    productPattern: /柜|储物柜|储物架|置物架|storage|cabinet|wardrobe|shelf|收纳(?:盒|箱|架|柜|筐|桶|袋|篮|屉)|斗柜|书柜|鞋柜|餐柜|电视柜|床头柜|衣柜|衣架|hanger/,
     excludeProductPattern: /服饰|短袖|t恤/,
     promptTerms: ['收纳', '柜子', '衣柜', '储物', '置物架', '桌面整理', '鞋柜'],
   },
@@ -402,6 +402,27 @@ export function getRawProductText(product: CatalogProduct) {
     ...product.scenarios.filter((t) => !GENERIC_META_TAGS.has(t)),
   ].join(' '))
   _rawTextCache.set(key, cached)
+  return cached
+}
+
+// Lean version for intent filtering: excludes descriptive fields (feature, benefit,
+// pairing_note, craftsmanship) that describe usage context rather than product type.
+// Prevents e.g. a desk whose pairing_note mentions "收纳盒" from matching storage intent.
+const _coreTextCache = new Map<string, string>()
+export function getCoreProductText(product: CatalogProduct) {
+  const key = product.id || product.name
+  let cached = _coreTextCache.get(key)
+  if (cached !== undefined) return cached
+  cached = normalizeText([
+    product.name,
+    product.brand,
+    product.category === '精选商品' ? '' : product.category,
+    ...product.keywords,
+    ...product.style_tags.filter((t) => !GENERIC_META_TAGS.has(t)),
+    ...product.room_tags,
+    ...product.scenarios.filter((t) => !GENERIC_META_TAGS.has(t)),
+  ].join(' '))
+  _coreTextCache.set(key, cached)
   return cached
 }
 

@@ -158,24 +158,3 @@ export function isProductWithinBudget(product: CatalogProduct, text: string) {
   return price <= budget
 }
 
-function getRequestedBrandAliases(text: string) {
-  const normalizedText = normalizeText(text)
-  return BRAND_GROUPS.find((group) => group.some((brand) => normalizedText.includes(normalizeText(brand)))) ?? []
-}
-
-export function filterByRequestedBrand(products: CatalogProduct[], text: string) {
-  const requestedBrands = getRequestedBrandAliases(text)
-  if (!requestedBrands.length) {
-    return products
-  }
-
-  return products.filter((product) => {
-    const productText = normalizeText([
-      product.brand,
-      product.name,
-      ...getBrandAliases(product.brand),
-      ...product.keywords,
-    ].join(' '))
-    return requestedBrands.some((brand) => productText.includes(normalizeText(brand)))
-  })
-}

@@ -1,20 +1,159 @@
 import productsJson from '../data/products.json'
 import realProductsJson from '../data/realProducts.json'
+import enrichedJson from '../data/realProductsEnriched.json'
 import type { CatalogProduct, ProductIntent, ScoredProduct } from './catalogTypes'
 import { BRAND_GROUPS, getGenderPreference, getProductCnyPrice, getRequestedBudget, hasOppositeGender, hasRequestedBrand, isProductCompatibleWithRequest, isProductInFamily } from './catalogFilters'
-import { getDominantIntent, getMatchedIntents, getRequestedProductFamily, getRawProductText } from './catalogIntents'
+import { getDominantIntent, getMatchedIntents, getRequestedProductFamily, getRawProductText, getCoreProductText } from './catalogIntents'
 import { getBrandAliases, normalizeText, scoreKeyword, stableHash, tokenize } from './catalogText'
 import { getDisplayImage, isPoorDisplayImage } from './productImagePolicy'
 import { shouldClarifyBeforeRecommendation } from './recommendationSlots'
 
+// ── Curated products (unchanged) ──
 const curatedProducts = productsJson as CatalogProduct[]
-const crawledProducts = (realProductsJson as { products: CatalogProduct[] }).products
+
+// ── Build enriched subcategory lookup ──
+const enrichedSubCategoryMap = new Map<string, string>()
+for (const p of (enrichedJson as { products: CatalogProduct[] }).products) {
+  const sc = (p as any)._subCategory
+  if (sc) enrichedSubCategoryMap.set(p.id, sc)
+}
+
+// ── Precomputed product index (computed once at load time) ──
+interface PrecomputedProduct {
+  product: CatalogProduct
+  normalizedName: string
+  normalizedKeywords: string[]
+  nameTokens: string[]
+  normalizedBrand: string
+  brandAliasNorms: string[]
+  productText: string   // full text for scoring (includes feature/benefit/pairing)
+  coreText: string      // lean text for intent filtering (name/brand/category/keywords only)
+  subCat: string
+  mainCat: string
+  price: number | null
+  poorImage: boolean
+}
+
+const precomputedIndex: PrecomputedProduct[] = []
+const invertedIndex = new Map<string, Set<number>>()
+
+function addToInvertedIndex(token: string, idx: number, weight: number) {
+  if (token.length < 2) return
+  let entry = invertedIndex.get(token)
+  if (!entry) {
+    entry = new Set<number>()
+    invertedIndex.set(token, entry)
+  }
+  entry.add(idx)
+}
+
+for (let i = 0; i < realProductsJson.products.length; i++) {
+  const product = realProductsJson.products[i] as CatalogProduct
+  const enrichedSubCat = enrichedSubCategoryMap.get(product.id)
+  const enrichedMainCat = (enrichedJson.products[i] as any)?._mainCategory ?? ''
+
+  const normalizedName = normalizeText(product.name)
+  const normalizedKeywords = product.keywords.map((kw) => normalizeText(kw))
+  const nameTokens = tokenize(product.name)
+  const normalizedBrand = normalizeText(product.brand)
+  const brandAliasNorms = getBrandAliases(product.brand).map((a) => normalizeText(a))
+  const productText = getRawProductText(product)
+  const coreText = getCoreProductText(product)
+  const subCat = enrichedSubCat || (product as any)._subCategory || ''
+  const mainCat = enrichedMainCat
+  const price = getProductCnyPrice(product)
+  const poorImage = isPoorDisplayImage(product)
+
+  precomputedIndex.push({
+    product, normalizedName, normalizedKeywords, nameTokens,
+    normalizedBrand, brandAliasNorms, productText, coreText,
+    subCat, mainCat, price, poorImage,
+  })
+
+  for (const kw of normalizedKeywords) addToInvertedIndex(kw, i, 2)
+  addToInvertedIndex(normalizedBrand, i, 6)
+  for (const alias of brandAliasNorms) addToInvertedIndex(alias, i, 8)
+  for (const t of nameTokens) addToInvertedIndex(t, i, 4)
+}
+
+// ── Intent → expected mainCategory for cheap candidate expansion ──
+const intentToExpectedMainCats: Record<string, string[]> = {
+  shoes: ['运动服饰', '户外服饰'],
+  sportswear: ['运动服饰', '户外服饰'],
+  weather_outerwear: ['运动服饰', '户外服饰'],
+  tee: ['T恤', '运动服饰'],
+  shirt: ['衬衫', '衬衫·针织衫'],
+  pants: ['裤装', '运动服饰'],
+  dress: ['连衣裙·半身裙'],
+  knitwear: ['运动服饰'],
+  outerwear_cold: ['运动服饰', '外套'],
+  underwear: ['内衣·内裤'],
+  socks: ['运动服饰', '配件'],
+  accessory: ['运动服饰', '配件'],
+  lighting: ['灯具'],
+  office_chair: ['office furniture', 'seating'],
+  seating: ['office furniture', 'seating'],
+  sofa_bed: ['家具', '卧室家具', '沙发床', '双人沙发床', '三人沙发床'],
+  table_desk: ['tables', '家具', '实木/成品家具-客厅', '实木/成品家具-书房茶室'],
+  storage: ['storage furniture', '收纳家具', '收纳用品'],
+  kitchenware: ['餐具·厨具'],
+  air_conditioner: ['空调', 'air-conditioners'],
+  refrigerator: ['家用电器', 'refrigerators'],
+  washer: ['家用电器', 'washers-and-dryers'],
+  tv_monitor: ['电器/数码', '智能电器/数码', 'monitors'],
+  kitchen_appliance: ['家用电器', 'kitchen-appliances', 'cooking-baking', 'dishwashers'],
+  smart_home: ['家用电器', '智能电器/数码', 'home-appliances', 'vacuum-cleaners'],
+  audio: ['电器/数码', 'audio-sound'],
+  laptop_tablet: ['电器/数码', '智能电器/数码'],
+  cosmetics_skincare: ['精选商品'],
+  bedding: ['床上用品', '家具'],
+  home_decor: ['精选商品', '家具', '收纳用品'],
+  food_snacks: ['精选商品'],
+  personal_care_appliance: ['家用电器', 'personal-care/home-appliances'],
+  cleaning: ['cleaning-and-care', '家用电器'],
+  baby_products: ['新生儿·婴儿', '幼儿服装'],
+  phone_accessory: ['精选商品', '智能电器/数码'],
+  pet_products: ['精选商品'],
+}
 
 // ── Shared regex constants ──
-const RE_PET_USER = /宠物|狗狗|猫咪/
-const RE_PET_PRODUCT = /宠物|狗狗|猫咪/
+const RE_PET = /宠物|狗狗|猫咪/
 const RE_CHILD_USER = /儿童|孩子|童|幼儿|大童|小童|婴童|宝宝|baby|infant|toddler|kids/
 const RE_CHILD_PRODUCT = /儿童|幼儿|幼童|婴童|宝宝|大童|小童|男童|女童|童装|baby|infant|toddler|kids/
+
+// ── Module-level constant maps (previously rebuilt per product) ──
+const SUB_CAT_MAPPINGS: Record<string, string[]> = {
+  '椅凳': ['椅', '凳', 'chair', 'seat', 'stool'],
+  '沙发': ['沙发', 'sofa'],
+  '沙发床': ['沙发床'],
+  '桌子': ['桌', 'desk', 'table'],
+  '床/床架': ['床', 'bed', 'mattress'],
+  '柜架': ['柜', '架', 'shelf', 'cabinet'],
+  '收纳': ['收纳', '储物', '整理', 'storage'],
+  '灯具': ['灯', '灯具', '台灯', '落地灯', 'lamp', 'light'],
+  '餐具': ['餐具', '碗', '盘', '杯', 'dinnerware'],
+  '运动装备': ['运动鞋', '跑鞋', '板鞋', '跑步鞋'],
+  'T恤': ['t恤', 'tee'],
+  '衬衫': ['衬衫', 'shirt'],
+  '裤装': ['裤', 'pants', 'jeans'],
+  '裙装': ['裙', 'skirt', 'dress'],
+  '外套': ['外套', '夹克', 'jacket'],
+}
+
+const INTENT_TO_EXPECTED_SUB_CAT: Record<string, string[]> = {
+  table_desk: ['桌子'],
+  seating: ['椅凳'],
+  office_chair: ['椅凳'],
+  sofa_bed: ['沙发', '沙发床'],
+  storage: ['收纳', '柜架'],
+  lighting: ['灯具'],
+  kitchenware: ['餐具', '锅具', '刀具', '水壶'],
+  shoes: ['运动装备'],
+  tee: ['T恤'],
+  shirt: ['衬衫'],
+  pants: ['裤装'],
+  dress: ['裙装'],
+}
 
 // ── User text analysis (cached) ──
 interface UserTextAnalysis {
@@ -50,7 +189,7 @@ function analyzeUserText(text: string): UserTextAnalysis {
   return cached
 }
 
-// ── Intent fit scoring (no gender check — already filtered) ──
+// ── Intent fit scoring ──
 function scoreIntentFit(productText: string, ctx: UserTextAnalysis) {
   let score = 0
   for (const intent of ctx.matchedIntents) {
@@ -67,7 +206,7 @@ function scoreIntentFit(productText: string, ctx: UserTextAnalysis) {
       score -= isDominant ? 160 : 40
     }
   }
-  if (!RE_PET_USER.test(ctx.normalizedText) && RE_PET_PRODUCT.test(productText)) score -= 220
+  if (!RE_PET.test(ctx.normalizedText) && RE_PET.test(productText)) score -= 220
   if (!RE_CHILD_USER.test(ctx.normalizedText) && RE_CHILD_PRODUCT.test(productText)) score -= 160
   return score
 }
@@ -78,14 +217,15 @@ function passIntentFilter(productText: string, intent: ProductIntent | null, nor
   if (!intent.productPattern.test(productText)) return false
   if (intent.requireProductPattern && !intent.requireProductPattern.test(productText)) return false
   if (intent.excludeProductPattern?.test(productText)) return false
-  if (!RE_PET_USER.test(normalizedText) && RE_PET_PRODUCT.test(productText)) return false
+  if (!RE_PET.test(normalizedText) && RE_PET.test(productText)) return false
   if (!RE_CHILD_USER.test(normalizedText) && RE_CHILD_PRODUCT.test(productText)) return false
   return true
 }
 
-// ── Product scoring (receives pre-computed values) ──
-function scoreProduct(product: CatalogProduct, ctx: UserTextAnalysis, productText: string, price: number | null) {
-  // Score descriptive fields (brand/aliases/keywords scored separately with weights)
+// ── Product scoring (reads precomputed values, no normalizeText calls) ──
+function scoreProduct(pre: PrecomputedProduct, ctx: UserTextAnalysis) {
+  const { product } = pre
+
   const fields = [
     product.name, product.category, product.materials,
     product.craftsmanship, product.feature, product.benefit, product.pairing_note,
@@ -98,26 +238,23 @@ function scoreProduct(product: CatalogProduct, ctx: UserTextAnalysis, productTex
 
   // Brand with weight
   score += scoreKeyword(product.brand, ctx.normalizedText, ctx.tokens) * 6
-  const aliases = getBrandAliases(product.brand)
-  for (let i = 0; i < aliases.length; i++) {
-    score += scoreKeyword(aliases[i], ctx.normalizedText, ctx.tokens) * 8
+  for (let i = 0; i < pre.brandAliasNorms.length; i++) {
+    score += scoreKeyword(pre.brandAliasNorms[i], ctx.normalizedText, ctx.tokens) * 8
   }
 
   // Keywords with weight + substring match in user query
-  for (let i = 0; i < product.keywords.length; i++) {
+  for (let i = 0; i < pre.normalizedKeywords.length; i++) {
     score += scoreKeyword(product.keywords[i], ctx.normalizedText, ctx.tokens) * 2
-    // If keyword is a substring of user query (e.g. "跑鞋" in "我想要一双跑鞋")
-    const nk = normalizeText(product.keywords[i])
+    const nk = pre.normalizedKeywords[i]
     if (nk.length >= 2 && ctx.normalizedText.includes(nk)) {
       score += nk.length * 4
     }
   }
 
   // Double-match boost: keyword in both user text and product name
-  const normalizedName = normalizeText(product.name)
-  for (const kw of product.keywords) {
-    const nk = normalizeText(kw)
-    if (nk.length >= 2 && ctx.normalizedText.includes(nk) && normalizedName.includes(nk)) {
+  for (let i = 0; i < pre.normalizedKeywords.length; i++) {
+    const nk = pre.normalizedKeywords[i]
+    if (nk.length >= 2 && ctx.normalizedText.includes(nk) && pre.normalizedName.includes(nk)) {
       score += nk.length * 10
     }
   }
@@ -125,16 +262,15 @@ function scoreProduct(product: CatalogProduct, ctx: UserTextAnalysis, productTex
   // Name-match boost: product name contains user's specific query terms
   for (let i = 0; i < ctx.tokens.length; i++) {
     const token = ctx.tokens[i]
-    if (token.length >= 2 && normalizedName.includes(token)) {
-      // Stronger boost when token appears at a word boundary (end of name or followed by space)
-      const pos = normalizedName.indexOf(token)
-      const atBoundary = pos >= 0 && (pos + token.length >= normalizedName.length || normalizedName[pos + token.length] === ' ')
+    if (token.length >= 2 && pre.normalizedName.includes(token)) {
+      const pos = pre.normalizedName.indexOf(token)
+      const atBoundary = pos >= 0 && (pos + token.length >= pre.normalizedName.length || pre.normalizedName[pos + token.length] === ' ')
       score += token.length * (atBoundary ? 16 : 8)
     }
   }
 
-  // Subcategory boost: product's detected subcategory matches user query
-  const subCat = (product as any)._subCategory
+  // Subcategory boost
+  const subCat = pre.subCat
   if (subCat) {
     const subCatNorm = normalizeText(subCat)
     for (const token of ctx.tokens) {
@@ -143,32 +279,13 @@ function scoreProduct(product: CatalogProduct, ctx: UserTextAnalysis, productTex
         break
       }
     }
-    // Exact product type match: query token == subcategory → strong signal
     for (const token of ctx.tokens) {
       if (token.length >= 2 && subCatNorm === token) {
         score += 60
         break
       }
     }
-    // Also check if query term maps to subcategory
-    const subCatMappings: Record<string, string[]> = {
-      '椅凳': ['椅', '凳', 'chair', 'seat', 'stool'],
-      '沙发': ['沙发', 'sofa'],
-      '沙发床': ['沙发床'],
-      '桌子': ['桌', 'desk', 'table'],
-      '床/床架': ['床', 'bed', 'mattress'],
-      '柜架': ['柜', '架', 'shelf', 'cabinet'],
-      '收纳': ['收纳', '储物', '整理', 'storage'],
-      '灯具': ['灯', '灯具', '台灯', '落地灯', 'lamp', 'light'],
-      '餐具': ['餐具', '碗', '盘', '杯', 'dinnerware'],
-      '运动装备': ['运动鞋', '跑鞋', '板鞋', '跑步鞋'],
-      'T恤': ['t恤', 'tee'],
-      '衬衫': ['衬衫', 'shirt'],
-      '裤装': ['裤', 'pants', 'jeans'],
-      '裙装': ['裙', 'skirt', 'dress'],
-      '外套': ['外套', '夹克', 'jacket'],
-    }
-    const matchTerms = subCatMappings[subCat]
+    const matchTerms = SUB_CAT_MAPPINGS[subCat]
     if (matchTerms) {
       for (const term of matchTerms) {
         if (ctx.normalizedText.includes(normalizeText(term))) {
@@ -179,40 +296,36 @@ function scoreProduct(product: CatalogProduct, ctx: UserTextAnalysis, productTex
     }
   }
 
-  // Subcategory mismatch penalty: product's category doesn't match query intent
+  // Subcategory mismatch penalty
   if (ctx.dominantIntent) {
-    const intentToExpectedSubCat: Record<string, string[]> = {
-      table_desk: ['桌子'],
-      seating: ['椅凳'],
-      office_chair: ['椅凳'],
-      sofa_bed: ['沙发', '沙发床'],
-      storage: ['收纳', '柜架'],
-      lighting: ['灯具'],
-      kitchenware: ['餐具', '锅具', '刀具', '水壶'],
-      shoes: ['运动装备'],
-      tee: ['T恤'],
-      shirt: ['衬衫'],
-      pants: ['裤装'],
-      dress: ['裙装'],
-    }
-    const expected = intentToExpectedSubCat[ctx.dominantIntent.id]
+    const expected = INTENT_TO_EXPECTED_SUB_CAT[ctx.dominantIntent.id]
     if (expected) {
       if (!subCat) {
-        score -= 30 // No subcategory tag → slight penalty when intent is clear
+        score -= 30
       } else if (!expected.includes(subCat)) {
-        score -= 50 // Wrong subcategory → bigger penalty
+        score -= 50
       }
     }
   }
 
-  score += scoreIntentFit(productText, ctx)
+  // mainCategory relevance boost
+  if (ctx.dominantIntent) {
+    const expectedMain = intentToExpectedMainCats[ctx.dominantIntent.id]
+    if (expectedMain && pre.mainCat) {
+      if (expectedMain.includes(pre.mainCat)) {
+        score += 35
+      }
+    }
+  }
 
-  if (isPoorDisplayImage(product) && !ctx.hasBrand) {
+  score += scoreIntentFit(pre.productText, ctx)
+
+  if (pre.poorImage && !ctx.hasBrand) {
     score -= 44
   }
 
-  if (ctx.budget && price !== null) {
-    score += price <= ctx.budget ? 24 : -80
+  if (ctx.budget && pre.price !== null) {
+    score += pre.price <= ctx.budget ? 24 : -80
   } else if (ctx.budget && /价格以官网为准|price on request|官网/.test(product.price_range)) {
     score -= 12
   }
@@ -220,24 +333,23 @@ function scoreProduct(product: CatalogProduct, ctx: UserTextAnalysis, productTex
   return score
 }
 
-// ── Exact product signal ──
-function scoreExactProductSignal(product: CatalogProduct, normalizedText: string, aliases: string[]) {
+// ── Exact product signal (reads precomputed values) ──
+function scoreExactProductSignal(pre: PrecomputedProduct, normalizedText: string) {
   let score = 0
-  const normalizedName = normalizeText(product.name)
-  if (normalizedName.length >= 4 && normalizedText.includes(normalizedName)) score += 260
+  if (pre.normalizedName.length >= 4 && normalizedText.includes(pre.normalizedName)) score += 260
 
-  const normalizedId = normalizeText(product.id)
+  const normalizedId = normalizeText(pre.product.id)
   if (normalizedId.length >= 4 && normalizedText.includes(normalizedId)) score += 160
 
-  const allBrands = [product.brand, ...aliases]
-  for (let i = 0; i < allBrands.length; i++) {
-    const nb = normalizeText(allBrands[i])
-    if (nb && normalizedText.includes(nb)) { score += 80; break }
+  if (pre.normalizedBrand && normalizedText.includes(pre.normalizedBrand)) { score += 80 }
+  else {
+    for (const alias of pre.brandAliasNorms) {
+      if (alias && normalizedText.includes(alias)) { score += 80; break }
+    }
   }
 
-  const modelTokens = tokenize(product.name)
-  for (let i = 0; i < modelTokens.length && i < 6; i++) {
-    if (/[a-z0-9]/i.test(modelTokens[i]) && modelTokens[i].length >= 3 && normalizedText.includes(modelTokens[i])) {
+  for (let i = 0; i < pre.nameTokens.length && i < 6; i++) {
+    if (/[a-z0-9]/i.test(pre.nameTokens[i]) && pre.nameTokens[i].length >= 3 && normalizedText.includes(pre.nameTokens[i])) {
       score += 36
     }
   }
@@ -245,21 +357,20 @@ function scoreExactProductSignal(product: CatalogProduct, normalizedText: string
 }
 
 // ── Pool selection ──
-function pickFromRelevantPool(scoredProducts: ScoredProduct[], ctx: UserTextAnalysis) {
-  scoredProducts.sort((a, b) => {
+function pickFromRelevantPool(scored: ScoredProduct[], ctx: UserTextAnalysis) {
+  scored.sort((a, b) => {
     if (b.exactScore !== a.exactScore) return b.exactScore - a.exactScore
     if (b.score !== a.score) return b.score - a.score
     return b.spreadScore - a.spreadScore
   })
 
-  const bestMatch = scoredProducts[0]
+  const bestMatch = scored[0]
   if (!bestMatch) return undefined
   if (bestMatch.exactScore >= 180) return bestMatch
 
   const topScore = bestMatch.score
-  // Tighter threshold: only include products within 5% or 8 points of the top score
   const floorScore = Math.max(6, topScore - 8, topScore * 0.95)
-  const relevantPool = scoredProducts
+  const relevantPool = scored
     .filter((c) => c.score >= floorScore)
     .slice(0, 48)
 
@@ -269,16 +380,20 @@ function pickFromRelevantPool(scoredProducts: ScoredProduct[], ctx: UserTextAnal
   return relevantPool[poolIndex]
 }
 
-// ── Matched preferences (from pre-computed data) ──
-function getMatchedPreferences(product: CatalogProduct, normalizedText: string) {
-  const matches = product.keywords
-    .filter((kw) => normalizedText.includes(normalizeText(kw)))
-    .slice(0, 4)
-  return matches.length ? matches : product.scenarios.slice(0, 3)
+// ── Matched preferences (match on normalized, return original keyword for display) ──
+function getMatchedPreferences(pre: PrecomputedProduct, normalizedText: string) {
+  const matches: string[] = []
+  for (let i = 0; i < pre.normalizedKeywords.length; i++) {
+    if (normalizedText.includes(pre.normalizedKeywords[i])) {
+      matches.push(pre.product.keywords[i])
+      if (matches.length >= 4) break
+    }
+  }
+  return matches.length ? matches : pre.product.scenarios.slice(0, 3)
 }
 
-// ── Core: find best product from a catalog ──
-function findBestProduct(products: CatalogProduct[], text: string) {
+// ── Core: find best product from precomputed index ──
+function findBestFromIndex(text: string) {
   const ctx = analyzeUserText(text)
   const intent = ctx.dominantIntent
 
@@ -286,39 +401,61 @@ function findBestProduct(products: CatalogProduct[], text: string) {
   const requestedBrandGroup = BRAND_GROUPS.find((g) => g.some((b) => ctx.normalizedText.includes(normalizeText(b))))
   const requestedBrandNorms = requestedBrandGroup?.map((b) => normalizeText(b))
 
-  const scored: ScoredProduct[] = []
+  // Build candidate set via inverted index when tokens exist, else scan all
+  let candidateIndices: Set<number> | null = null
+  if (ctx.tokens.length > 0) {
+    candidateIndices = new Set<number>()
+    for (const token of ctx.tokens) {
+      const hits = invertedIndex.get(token)
+      if (hits) {
+        for (const idx of hits) candidateIndices.add(idx)
+      }
+    }
+    // Fallback to full scan when inverted index produces too few candidates
+    if (candidateIndices.size < 8) candidateIndices = null
+  }
 
-  for (let i = 0; i < products.length; i++) {
-    const product = products[i]
+  // mainCategory pre-skip set (only when intent is clear)
+  const expectedMainCats = intent ? intentToExpectedMainCats[intent.id] ?? null : null
+
+  const scored: ScoredProduct[] = []
+  const len = precomputedIndex.length
+  const useCandidate = candidateIndices !== null && candidateIndices.size > 8
+
+  for (let i = 0; i < len; i++) {
+    if (useCandidate && !candidateIndices!.has(i)) continue
+
+    const pre = precomputedIndex[i]
+    const { product } = pre
 
     // Brand filter
     if (requestedBrandNorms) {
-      const pBrand = normalizeText(product.brand)
-      const pAliases = getBrandAliases(product.brand).map((a) => normalizeText(a))
+      const pBrand = pre.normalizedBrand
+      const pAliases = pre.brandAliasNorms
       if (!requestedBrandNorms.some((b) => pBrand.includes(b) || pAliases.some((a) => a.includes(b)))) continue
     }
 
-    const productText = getRawProductText(product)
-
-    // Intent filter
-    if (intent && !passIntentFilter(productText, intent, ctx.normalizedText)) continue
+    // Intent filter (uses coreText — excludes feature/benefit/pairing to avoid false matches)
+    if (intent && !passIntentFilter(pre.coreText, intent, ctx.normalizedText)) continue
 
     // Gender filter
-    if (hasOppositeGender(productText, ctx.genderPreference)) continue
+    if (hasOppositeGender(pre.productText, ctx.genderPreference)) continue
 
     // Family filter
     if (ctx.requestedFamily && !isProductInFamily(product, ctx.requestedFamily as any)) continue
 
-    // Budget filter + price caching
-    const price = getProductCnyPrice(product)
-    if (ctx.budget && price && price > ctx.budget) continue
+    // Budget filter
+    if (ctx.budget && pre.price && pre.price > ctx.budget) continue
 
-    const aliases = getBrandAliases(product.brand)
+    // mainCategory cheap skip: skip clearly-unrelated categories (but keep enough candidates)
+    if (expectedMainCats && pre.mainCat && !expectedMainCats.includes(pre.mainCat)) {
+      if (scored.length > 12) continue
+    }
 
     scored.push({
       product,
-      score: scoreProduct(product, ctx, productText, price),
-      exactScore: scoreExactProductSignal(product, ctx.normalizedText, aliases),
+      score: scoreProduct(pre, ctx),
+      exactScore: scoreExactProductSignal(pre, ctx.normalizedText),
       spreadScore: stableHash(`${ctx.normalizedText}|${product.id}|${product.name}|${product.source_url}`) % 1000,
     })
   }
@@ -331,10 +468,9 @@ function findBestProduct(products: CatalogProduct[], text: string) {
 export function pickProductRecommendation(text: string) {
   if (shouldClarifyBeforeRecommendation(text)) return null
 
-  const bestCrawled = findBestProduct(crawledProducts, text)
-  const bestCurated = findBestProduct(curatedProducts, text)
+  const bestCrawled = findBestFromIndex(text)
+  const bestCurated = findBestProductFromCurated(text)
 
-  // Pick the better match across both pools
   let selectedMatch = bestCrawled
   if (bestCurated && (!selectedMatch || bestCurated.score > selectedMatch.score)) {
     selectedMatch = bestCurated
@@ -342,7 +478,6 @@ export function pickProductRecommendation(text: string) {
 
   if (!selectedMatch || selectedMatch.score < 6) return null
 
-  // If best match fails compatibility, try the other pool
   if (!isProductCompatibleWithRequest(selectedMatch.product, text)) {
     const fallback = selectedMatch === bestCrawled ? bestCurated : bestCrawled
     if (fallback && fallback.score >= 6 && isProductCompatibleWithRequest(fallback.product, text)) {
@@ -366,6 +501,9 @@ export function pickProductRecommendation(text: string) {
     ? `先看尺码、颜色、使用场景和官网详情；如果这些都对，再和同品牌相近款放在一起比较。`
     : product.pairing_note
 
+  // Find the precomputed entry for matched_preferences
+  const matchedPre = precomputedIndex.find((e) => e.product.id === product.id)
+
   return {
     ...product,
     image: getDisplayImage(product),
@@ -374,8 +512,65 @@ export function pickProductRecommendation(text: string) {
     pairing_note: displayPairing,
     craftsmanship: product.craftsmanship || displayFeature,
     consultant_summary: `${product.name} 是当前信息里比较贴近的一款：有清晰商品页、价格和图片，适合先拿它作为判断基准。`,
-    matched_preferences: getMatchedPreferences(product, normalizeText(text)),
+    matched_preferences: matchedPre
+      ? getMatchedPreferences(matchedPre, normalizeText(text))
+      : product.keywords.slice(0, 4),
     why_this: [displayBenefit, displayFeature, displayPairing],
     why_not_others: '我先给一件最贴近当前语境的核心单品，方便你判断方向；如果你补充预算、尺码或使用场景，再继续缩小范围。',
   }
+}
+
+// ── Curated pool (only 8 items, no index needed) ──
+function findBestProductFromCurated(text: string) {
+  const ctx = analyzeUserText(text)
+  const intent = ctx.dominantIntent
+
+  // Brand pre-filter (same logic as findBestFromIndex)
+  const requestedBrandGroup = BRAND_GROUPS.find((g) => g.some((b) => ctx.normalizedText.includes(normalizeText(b))))
+  const requestedBrandNorms = requestedBrandGroup?.map((b) => normalizeText(b))
+
+  const scored: ScoredProduct[] = []
+  for (let i = 0; i < curatedProducts.length; i++) {
+    const product = curatedProducts[i]
+
+    // Brand filter
+    if (requestedBrandNorms) {
+      const pBrand = normalizeText(product.brand)
+      const pAliases = getBrandAliases(product.brand).map((a) => normalizeText(a))
+      if (!requestedBrandNorms.some((b) => pBrand.includes(b) || pAliases.some((a) => a.includes(b)))) continue
+    }
+
+    const productText = getRawProductText(product)
+    const coreText = getCoreProductText(product)
+    if (intent && !passIntentFilter(coreText, intent, ctx.normalizedText)) continue
+    if (hasOppositeGender(productText, ctx.genderPreference)) continue
+    if (ctx.requestedFamily && !isProductInFamily(product, ctx.requestedFamily as any)) continue
+
+    const price = getProductCnyPrice(product)
+    if (ctx.budget && price && price > ctx.budget) continue
+
+    const aliases = getBrandAliases(product.brand)
+    const normalizedName = normalizeText(product.name)
+    const normalizedKeywords = product.keywords.map((kw) => normalizeText(kw))
+    const nameTokens = tokenize(product.name)
+    const normalizedBrand = normalizeText(product.brand)
+    const brandAliasNorms = aliases.map((a) => normalizeText(a))
+
+    const pre: PrecomputedProduct = {
+      product, normalizedName, normalizedKeywords, nameTokens,
+      normalizedBrand, brandAliasNorms, productText, coreText,
+      subCat: (product as any)._subCategory || '',
+      mainCat: '', price, poorImage: isPoorDisplayImage(product),
+    }
+
+    scored.push({
+      product,
+      score: scoreProduct(pre, ctx),
+      exactScore: scoreExactProductSignal(pre, ctx.normalizedText),
+      spreadScore: stableHash(`${ctx.normalizedText}|${product.id}|${product.name}|${product.source_url}`) % 1000,
+    })
+  }
+
+  if (scored.length === 0 && intent?.requireProductPattern) return undefined
+  return pickFromRelevantPool(scored, ctx)
 }
