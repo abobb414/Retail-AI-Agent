@@ -1,5 +1,5 @@
 import type { ProductFamily, SlotRequirement } from './catalogTypes'
-import { getRequestedProductFamily } from './catalogIntents'
+import { getDominantIntent, getRequestedProductFamily } from './catalogIntents'
 
 function hasBudgetSignal(text: string) {
   return /预算|价格|价位|\d{2,6}\s*(元|块|以内|以下|左右|上下)|低预算|中预算|高预算|便宜|平价|贵一点|不差钱/.test(text)
@@ -162,6 +162,16 @@ export function shouldClarifyBeforeRecommendation(text: string) {
     return false
   }
 
+  // Multi-turn context (contains "；"): the user is responding to a clarification question.
+  // If the latest part is a short contextual response (no intent, no budget), skip clarification
+  // and let pickProductRecommendation handle it with the full context.
+  if (text.includes('；')) {
+    const latestPart = text.slice(text.lastIndexOf('；') + 1).trim()
+    if (latestPart.length <= 8 && !getDominantIntent(latestPart) && !hasBudgetSignal(latestPart)) {
+      return false
+    }
+  }
+
   if (getRecommendationClarificationMessage(text)) {
     return true
   }
@@ -171,5 +181,5 @@ export function shouldClarifyBeforeRecommendation(text: string) {
 }
 
 export function wantsProductRecommendation(text: string) {
-  return /推荐|产品|商品|具体|买|购入|单品|给我一个|给我推荐|直接|想要|需要|适合|找|选|搭配|官网|型号|改变|治愈|疲惫|好累|幸福感|一团糟|整理|收纳|理一下|新工作|加班|运动|训练|跑步|瑜伽|户外|登山|露营|通勤|穿|鞋|衣服|半袖|短袖|t恤|冲锋衣|硬壳|防风|防雨|防水|外套|夹克|裤|家电|空调|冰箱|洗衣|电视|家具|沙发|床|桌|椅|手机壳|灯|拖鞋|polo|吸尘器|洗碗机|化妆包|挂衣架|枕头|蜡烛|背心|针织|卫衣|羽绒|防晒|内衣|裙|衬衫|柜|餐具|咖啡机|水壶|烤箱|微波炉|显示器|手机|手表|耳机|风扇|刀|锅|牙刷|剃须|清洁|平板|书架|鞋柜|衣柜|电视柜|收纳架|凳|碗|镜子|床架|香薰|预算|价格|冲锋衣|面包机|台灯|咖啡机|一双|换个|换一个|换一件|换/.test(text)
+  return /推荐|产品|商品|具体|买|购入|单品|给我一个|给我推荐|直接|想要|需要|适合|找|选|搭配|官网|型号|改变|治愈|疲惫|好累|幸福感|一团糟|整理|收纳|理一下|新工作|加班|运动|训练|跑步|瑜伽|户外|登山|露营|通勤|穿|鞋|衣服|半袖|短袖|t恤|冲锋衣|硬壳|防风|防雨|防水|外套|夹克|裤|家电|空调|冰箱|洗衣|电视|家具|沙发|床|桌|椅|手机壳|灯|拖鞋|polo|吸尘器|洗碗机|化妆包|挂衣架|枕头|蜡烛|背心|针织|卫衣|羽绒|防晒|内衣|裙|衬衫|柜|餐具|咖啡机|水壶|烤箱|微波炉|显示器|手机|手表|耳机|风扇|刀|锅|牙刷|剃须|清洁|平板|书架|鞋柜|衣柜|电视柜|收纳架|凳|碗|镜子|床架|香薰|预算|价格|冲锋衣|面包机|台灯|咖啡机|一双|换个|换一个|换一件|换|灯光|光线|氛围|暖光|冷光|柔光|舒服|舒适|好看|颜值|质感|品质|好用|耐用/.test(text)
 }

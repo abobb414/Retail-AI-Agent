@@ -39,32 +39,27 @@ function getRecommendationContext(messages: IncomingMessage[]) {
     return latestText
   }
 
-  // "换一个" / "换个" / "换一件": user wants a different product in the same category
-  // Carry forward all previous context (intent + budget + gender etc.)
-  if (/换/.test(latestText) && !latestIntent) {
-    // Find the most recent message with a product intent
-    for (let i = userMessages.length - 2; i >= 0; i--) {
-      const prevIntent = getDominantIntent(userMessages[i].content.trim())
-      if (prevIntent) {
-        // Combine ALL user messages from the intent message onward + latest "换" request
-        const contextParts = userMessages.slice(i).map((m) => m.content.trim())
-        // Replace the last element (which is the intent message) with the combined context
-        contextParts[contextParts.length - 1] = latestText
-        return contextParts.join('；')
-      }
+  // Latest message has no product intent — combine with previous context.
+  // Find the most recent message with a product intent.
+  let intentIndex = -1
+  for (let i = userMessages.length - 2; i >= 0; i--) {
+    if (getDominantIntent(userMessages[i].content.trim())) {
+      intentIndex = i
+      break
     }
   }
 
-  // Find the first message with a product intent (the original request)
-  const firstIntentMessage = userMessages.find((m) => getDominantIntent(m.content.trim()))
-  const firstIntentText = firstIntentMessage?.content.trim() || ''
-
-  // Combine: first intent + latest context (avoid middle messages polluting intent)
-  const contextParts = [firstIntentText]
-  if (latestText !== firstIntentText) {
-    contextParts.push(latestText)
+  if (intentIndex >= 0) {
+    // Combine: intent message + all messages after it + latest
+    // This preserves budget/gender/context from intermediate messages
+    // e.g. "半袖" + "男士300以内" + "换一个"
+    // e.g. "外套" + "男士500以内" + "灯光"
+    return userMessages.slice(intentIndex).map((m) => m.content.trim()).join('；')
   }
-  return contextParts.filter(Boolean).join('；')
+
+  // No intent in any message — combine ALL messages as context
+  // e.g. "小卧室想更舒服" + "灯光" → contextual request for lighting
+  return userMessages.map((m) => m.content.trim()).join('；')
 }
 
 function writeEvent(event: H3Event, name: string, data: unknown) {
