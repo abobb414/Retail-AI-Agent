@@ -5,7 +5,7 @@ export const productIntents: ProductIntent[] = [
   // ── 户外/防雨外套 ──
   {
     id: 'weather_outerwear',
-    userPattern: /冲锋衣|硬壳|gore|gore-tex|gtx|登山|户外外套|防风外套|防水外套|防风防雨|防风|防雨|防水|雨衣/,
+    userPattern: /冲锋衣|硬壳|gore|gore-tex|gtx|登山|户外外套|防风外套|防水外套|防风防雨|防风|防雨|防水|雨衣|外套|夹克/,
     productPattern: /冲锋衣|硬壳|gore|gore tex|gtx|storm fit|户外.*(夹克|外套)|登山.*(夹克|外套)|防风.*(夹克|外套)|防水.*(夹克|外套)|拒水.*(夹克|外套)|夹克|外套|jacket|coat|雨衣|风衣|大衣|trench/,
     requireProductPattern: /冲锋衣|硬壳|gore|gore tex|gtx|storm fit|防风|防水|拒水|雨衣|风衣|大衣|trench|夹克|外套|jacket|coat/,
     excludeProductPattern: /家具|沙发|床|椅|凳|豆袋|宠物|狗狗|猫咪/,

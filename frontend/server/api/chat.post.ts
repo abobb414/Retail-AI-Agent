@@ -39,6 +39,22 @@ function getRecommendationContext(messages: IncomingMessage[]) {
     return latestText
   }
 
+  // "换一个" / "换个" / "换一件": user wants a different product in the same category
+  // Carry forward all previous context (intent + budget + gender etc.)
+  if (/换/.test(latestText) && !latestIntent) {
+    // Find the most recent message with a product intent
+    for (let i = userMessages.length - 2; i >= 0; i--) {
+      const prevIntent = getDominantIntent(userMessages[i].content.trim())
+      if (prevIntent) {
+        // Combine ALL user messages from the intent message onward + latest "换" request
+        const contextParts = userMessages.slice(i).map((m) => m.content.trim())
+        // Replace the last element (which is the intent message) with the combined context
+        contextParts[contextParts.length - 1] = latestText
+        return contextParts.join('；')
+      }
+    }
+  }
+
   // Find the first message with a product intent (the original request)
   const firstIntentMessage = userMessages.find((m) => getDominantIntent(m.content.trim()))
   const firstIntentText = firstIntentMessage?.content.trim() || ''
