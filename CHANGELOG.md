@@ -8,6 +8,8 @@
 
 - 新增 `realProductsEnriched.json` 数据源接入：启动时合并 `_subCategory`（653 件商品补全）和 `_mainCategory`（2746 件全覆盖），用于意图过滤和评分加权。
 - 新增预计算商品索引：模块加载时一次性缓存 normalized name、keywords、brand aliases、productText、coreText、price、subCat、mainCat，每次请求从约 50,000 次 `normalizeText` 调用降到 0 次。
+- 新增"换一个"重新推荐功能：用户说"换一个"/"换个"/"换一件"时，继承之前对话的完整上下文（品类+性别+预算），推荐同类不同商品。
+- 新增多轮对话上下文继承：当最新消息无意图时，合并全部对话历史作为推荐上下文，追问回复（如"灯光"、"光线"）不再丢失场景信息。
 - 新增倒排索引：按 keywords/brand/nameTokens 构建 token → product index 映射，用于候选集预筛。
 - 新增 `intentToExpectedMainCats` 映射表（30+ 品类意图 → 预期 mainCategory），无关品类快速跳过、相关品类加分 +35。
 - 新增 `getCoreProductText`：仅含 name/brand/category/keywords 的精简文本，用于意图过滤，排除 feature/benefit/pairing_note 的干扰。
@@ -16,6 +18,10 @@
 ### 优化
 
 - 优化 `chat.post.ts` 澄清逻辑：用 `shouldClarifyBeforeRecommendation(fullUserText)` 替代 `hasSpecificProductName` 正则，解决"半袖"等品类名不在正则中导致的追问死循环。
+- 优化 `getRecommendationContext`：重构为统一的上下文合并逻辑——无意图时合并全部消息、有意图时合并意图消息及之后的所有消息，解决"换一个"和追问回复丢失上下文的问题。
+- 优化 `shouldClarifyBeforeRecommendation`：对短追问回复（≤8字、无意图、无预算）跳过追问，避免用户回答"灯光"后系统再次追问。
+- 优化 `wantsProductRecommendation`：加入"灯光/光线/氛围/暖光/冷光/舒服/舒适/好看/颜值/质感/品质/好用/耐用"等追问回复关键词。
+- 优化 `weather_outerwear` 意图：userPattern 加入"外套"和"夹克"，修复"外套"无法被外衣意图识别的问题。
 - 优化 `storage` 意图的 `productPattern`：`收纳` 必须和后缀词（盒/箱/架/柜/筐/桶/袋/篮/屉）组合才通过，避免"线缆收纳"等偶然提及误匹配。
 - 优化 `lighting` 意图的 `productPattern` 和 `requireProductPattern`：移除 `light`（保留 `lantern`），避免 Samsung SKU 中的 "light blue"/"light gray" 误匹配灯具意图。
 - 优化 `sofa_bed` 意图的 `userPattern`：收紧为 `/床(?!头|品|单|笠|罩|裙|架|上)/`，排除"床头"（bedside）、"床品"（bedding）等复合词。
@@ -28,6 +34,9 @@
 
 ### 修复
 
+- 修复"换一个"无法重新推荐：`wantsProductRecommendation` 没有"换"关键词，系统不认为这是推荐请求；`getRecommendationContext` 对"换一个"丢失了之前的品类+性别+预算上下文。
+- 修复"外套"无法被外衣意图识别：`weather_outerwear` 的 userPattern 只有"冲锋衣/硬壳/防风"等细分词，缺少通用的"外套"和"夹克"。
+- 修复多轮对话追问回复丢失上下文：用户说"小卧室想更舒服"→系统追问→用户回答"灯光"时，`getRecommendationContext` 只返回"灯光"，丢失了"小卧室"的场景信息。改为合并全部对话历史。
 - 修复"宜家收纳柜"误匹配 BEKANT 书桌：书桌的 `feature` 含"线缆收纳"，`storage` 意图的 `productPattern` 过宽。改用 `coreText`（不含 feature/benefit/pairing_note）做意图过滤。
 - 修复"一盏暖光台灯"误匹配 Galaxy S22 Ultra LED 智能保护套：Samsung SKU 关键词含 "light gray"/"light blue" 匹配了 lighting 正则的 `light`。
 - 修复"给我推荐半袖→男士300以内"追问死循环：`hasSpecificProductName` 正则没有"半袖"，导致每次都跳过追问但信息不足。
@@ -39,6 +48,8 @@
 
 - 已验证 15 个查询测试：跑鞋 ✅、宜家书桌 ✅、小米空调 ✅、连衣裙 ✅、香薰机 ✅、洗碗机 ✅、收纳箱 ✅、Nike运动鞋 ✅、碗和盘子 ✅、鞋柜 ✅、半袖(追问) ✅、暖光台灯(追问) ✅。
 - 已验证多轮对话：半袖+男士300 → Nike T恤 ✅、暖光台灯+卧室 → BALMUDA 灯 ✅。
+- 已验证"换一个"：半袖+男士300+换一个 → 不同 T 恤 ✅、外套+男士500+换一个 → 不同外套 ✅。
+- 已验证追问回复：小卧室+灯光 → 识别灯具意图（DeepSeek 引导回复）✅、小卧室+调整氛围灯 → BALMUDA 灯 ✅。
 - 已验证品牌过滤：宜家收纳柜 → 无匹配（数据缺口，非代码问题）✅。
 - 已用 `nuxi build` 验证编译通过。
 - 已部署到 Vercel 生产环境（retail.abobb.site）。
