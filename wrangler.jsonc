@@ -1,0 +1,27 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "retail-ai-agent-worker",
+  "main": "index.ts",
+  "compatibility_date": "2026-06-29",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "retail-ai-agent-db",
+      "database_id": "0f56d440-77c1-4d0f-9594-35e4e26864f5"
+    }
+  ],
+  "vectorize": [
+    {
+      "binding": "VECTOR_INDEX",
+      "index_name": "retail-ai-agent-products-bge-m3"
+    }
+  ],
+  "ai": {
+    "binding": "AI"
+  }
+}

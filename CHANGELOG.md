@@ -2,6 +2,41 @@
 
 本文档记录 `Retail-AI-Agent` 的重要迭代。
 
+## [2026-06-30] — Cloudflare RAG 语义导购中枢 + 商品完美匹配修复
+
+### 新增
+
+- 新增 Cloudflare Worker 独立 RAG 中枢：`index.ts` 同时承接商品批量导入和 `POST /api/chat` 语义推荐接口，形成“用户提问 → Workers AI 向量化 → Vectorize TopK 检索 → D1 真实字段回捞 → Llama 结构化 JSON 提炼”的完整闭环。
+- 新增 `@cf/baai/bge-m3` 1024 维向量链路：商品入库时把名称、核心卖点和关键词拼成 Embedding 文本，用户提问时用同模型生成查询向量，彻底摆脱纯关键词规则对“同义表达、场景化描述、模糊需求”的识别瓶颈。
+- 新增正式 Vectorize 蓝绿索引 `retail-ai-agent-products-bge-m3`：支持从旧索引平滑迁移到新语义空间，避免临时小索引验证通过后无法承载 2700+ 商品的问题。
+- 新增 D1 商品结构扩展：`products` 表补齐 `vector_id`、`brand`、`price_display`、`image`、`ideal_for`、`avoid_for`，让前端卡片拿到的始终是真实商品图、真实官网链接和真实人群标签。
+- 新增 Worker 端强约束 JSON 输出：调用 `@cf/meta/llama-3.1-8b-instruct-fp8` 时要求纯 JSON 对象，并在返回前强制用 D1 原始字段覆盖 `id`、`name`、`image`、`url`、`price_display` 等关键字段，防止模型把商品改名、改图、改链接。
+- 新增 Nuxt → Cloudflare Worker 代理转发：前端 `/api/chat` 现在通过 `WORKER_CHAT_URL` 调用线上 Worker，保留原有 SSE 事件契约，把 Worker 返回的结构化推荐自动转成现有推荐卡片可渲染的数据格式。
+- 新增 `scripts/import-real-products.mjs` 全量导入脚本：支持 `BATCH_SIZE`、`CONCURRENCY`、`START_INDEX`、`LIMIT`、`RETRY_ATTEMPTS`、`WORKER_RESOLVE_IP`，可以小批量烟测，也可以断点续跑 2746 件完整商品。
+- 新增 `scripts/migrate-products-schema.mjs` 和 `migrations/001_expand_products_for_rag.sql`：线上 D1 扩字段、建唯一索引和重复执行保护都有脚本化路径，后续不用手敲 SQL。
+
+### 优化
+
+- 推荐逻辑从“本地规则硬匹配”升级为“向量语义召回 + 预算过滤 + D1 真实商品约束 + LLM 导购表达”，用户说“夏天通勤穿的半袖或者运动裤，预算 300 以内”这类自然语言时，不再卡死在单个关键词或品类正则上。
+- Vectorize 检索 TopK 提升到 20，再由预算与上下文筛到 LLM 的 5 个候选，给语义召回留足余量，同时控制 LLM 上下文成本。
+- 商品 ID 做 `vector_id` 兼容处理：短 ID 原样写入，超长 ID 自动哈希压缩，解决 Vectorize ID 长度限制和 D1 主键真实 ID 一致性之间的冲突。
+- 前端代理增加 Worker 错误解析、超时保护和可选 DNS 解析 IP 固定能力，降低本地联调、Vercel 代理和 Cloudflare 边缘访问之间的网络不确定性。
+- 导入脚本默认 `BATCH_SIZE=8`、串行稳态导入，配合 `LIMIT=5` 的低额度烟测策略，既能验证完整链路，又不会把 Workers AI 额度一次性烧光。
+
+### 修复
+
+- 修复“商品不能完美匹配”的核心问题：旧方案依赖品类正则、关键词倒排和人工规则，遇到同义词、复合需求、场景描述时容易漏召回或串品类；新方案用 bge-m3 语义向量先召回真实候选，再用 D1 字段约束最终卡片，命中逻辑更接近真实导购理解。
+- 修复模型可能幻觉商品字段的问题：LLM 只能在 D1 回捞出的 Context 中选择商品，最终响应再由 `sanitizeChatResponse` 把关键字段回填为数据库原值，保证前端展示的 ID、图片、价格和官网 URL 不被模型污染。
+- 修复全量重灌不可恢复的问题：导入脚本新增 `START_INDEX` 和 `LIMIT`，中途中断后可从指定商品序号继续跑，剩余 2700+ 商品不需要从头重算。
+- 修复 D1 老表结构无法支撑前端精致卡片的问题：扩展字段后，Worker 可以直接返回 `image`、`ideal_for`、`avoid_for`，不再只给名称和描述。
+- 修复前端旧 DeepSeek 本地商品匹配与 Worker RAG 结果割裂的问题：Nuxt 服务端 API 统一转发 Worker，前端组件不用重写即可消费真实 RAG 推荐结果。
+
+### 验证
+
+- 已完成前 5 条 bge-m3 烟测导入策略设计，可用 `LIMIT=5` 在额度恢复后先验证闭环，再用 `START_INDEX` 分段续跑剩余商品。
+- 已完成 2746 件商品全量导入脚本路径、D1 schema 迁移路径和 Vectorize 正式索引配置。
+- 已保留前端 SSE 事件格式：`chunk`、`product`、`meta`、`done`，现有 Nuxt 卡片组件可以继续渲染真实图片、官网链接、适合人群和避坑标签。
+
 ## [2026-06-28] — 预计算索引 + 匹配准确率 + 多轮对话修复
 
 ### 新增

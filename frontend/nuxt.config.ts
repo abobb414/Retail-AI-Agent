@@ -6,6 +6,8 @@ export default defineNuxtConfig({
     deepseekApiKey: process.env.DEEPSEEK_API_KEY || '',
     deepseekBaseUrl: process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com',
     deepseekModel: process.env.DEEPSEEK_MODEL || 'deepseek-chat',
+    workerChatUrl: process.env.WORKER_CHAT_URL || '',
+    workerResolveIp: process.env.WORKER_RESOLVE_IP || '',
   },
   app: {
     head: {
