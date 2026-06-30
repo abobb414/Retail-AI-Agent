@@ -98,10 +98,6 @@ type AiEmbeddingResponse = {
   shape?: number[];
 };
 
-type AiTextResponse = {
-  response?: string;
-};
-
 type RecommendedProduct = {
   id: string;
   name: string;
@@ -131,11 +127,10 @@ class HttpError extends Error {
 }
 
 const EMBEDDING_MODEL = "@cf/baai/bge-m3";
-const LLM_MODEL = "@cf/meta/llama-3.1-8b-instruct-fp8";
 const EMBEDDING_DIMENSIONS = 1024;
 const INGEST_BATCH_SIZE = 8;
 const VECTOR_TOP_K = 20;
-const LLM_CONTEXT_LIMIT = 5;
+const LEXICAL_TOP_K = 30;
 const textEncoder = new TextEncoder();
 
 const jsonHeaders = {
@@ -202,30 +197,13 @@ async function handleChat(request: Request, env: Env): Promise<Response> {
     );
   }
 
-  const queryVector = await generateSingleEmbedding(env, payload.message);
-  const vectorMatches = await env.VECTOR_INDEX.query(queryVector, {
-    topK: VECTOR_TOP_K,
-    returnValues: false,
-    returnMetadata: "none",
-  });
-
-  const matches = vectorMatches.matches ?? [];
-
-  if (matches.length === 0) {
-    return jsonResponse(buildNoMatchResponse(), 200);
-  }
-
-  const products = selectProductsForMessage(
-    payload.message,
-    filterProductsByRequestedKind(payload.message, await fetchProductsByVectorMatches(env, matches)),
-  ).slice(0, LLM_CONTEXT_LIMIT);
+  const products = await retrieveProductsForMessage(env, payload.message);
 
   if (products.length === 0) {
     return jsonResponse(buildNoMatchResponse(), 200);
   }
 
-  const llmResponse = await summarizeRecommendation(env, payload.message, products);
-  return jsonResponse(sanitizeChatResponse(llmResponse, products, payload.message), 200);
+  return jsonResponse(buildRecommendationResponse(payload.message, products[0]), 200);
 }
 
 async function handleIngest(request: Request, env: Env): Promise<Response> {
@@ -507,6 +485,112 @@ async function fetchProductsByVectorMatches(
     .filter((product): product is ProductContext => product !== null);
 }
 
+async function retrieveProductsForMessage(env: Env, message: string): Promise<ProductContext[]> {
+  const lexicalProducts = await safeProductSearch("Lexical product search failed", () =>
+    fetchProductsByLexicalSearch(env, message),
+  );
+  const lexicalCandidates = rankProductsForMessage(message, selectCandidateProducts(message, lexicalProducts));
+
+  if (lexicalCandidates.length > 0) {
+    return lexicalCandidates;
+  }
+
+  const semanticProducts = await safeProductSearch("Semantic product search failed", () =>
+    fetchProductsBySemanticSearch(env, message),
+  );
+  const mergedProducts = mergeProducts(lexicalProducts, semanticProducts);
+
+  return rankProductsForMessage(message, selectCandidateProducts(message, mergedProducts));
+}
+
+async function safeProductSearch(
+  logMessage: string,
+  search: () => Promise<ProductContext[]>,
+): Promise<ProductContext[]> {
+  try {
+    return await search();
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        message: logMessage,
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
+
+    return [];
+  }
+}
+
+function selectCandidateProducts(message: string, products: ProductContext[]): ProductContext[] {
+  const kindFilteredProducts = filterProductsByRequestedKind(message, products);
+  const budgetFilteredProducts = selectProductsForMessage(message, kindFilteredProducts);
+
+  return extractCnyBudget(message) ? budgetFilteredProducts : kindFilteredProducts;
+}
+
+async function fetchProductsBySemanticSearch(env: Env, message: string): Promise<ProductContext[]> {
+  const queryVector = await generateSingleEmbedding(env, message);
+  const vectorMatches = await env.VECTOR_INDEX.query(queryVector, {
+    topK: VECTOR_TOP_K,
+    returnValues: false,
+    returnMetadata: "none",
+  });
+
+  const matches = vectorMatches.matches ?? [];
+
+  if (matches.length === 0) {
+    return [];
+  }
+
+  return fetchProductsByVectorMatches(env, matches);
+}
+
+async function fetchProductsByLexicalSearch(env: Env, message: string): Promise<ProductContext[]> {
+  const terms = buildLexicalSearchTerms(message).slice(0, 10);
+
+  if (terms.length === 0) {
+    return [];
+  }
+
+  const searchableColumns = ["id", "name", "brand", "description", "ideal_for", "avoid_for"];
+  const whereClauses: string[] = [];
+  const bindings: string[] = [];
+
+  for (const term of terms) {
+    const likeTerm = `%${term}%`;
+
+    for (const column of searchableColumns) {
+      whereClauses.push(`LOWER(COALESCE(${column}, '')) LIKE ?`);
+      bindings.push(likeTerm);
+    }
+  }
+
+  const result = await env.DB.prepare(
+    `SELECT id, vector_id, name, brand, price, price_display, url, description, image, ideal_for, avoid_for
+     FROM products
+     WHERE ${whereClauses.join(" OR ")}
+     LIMIT ${LEXICAL_TOP_K}`,
+  )
+    .bind(...bindings)
+    .all<ProductRow>();
+
+  return (result.results ?? []).map((row) => rowToProductContext(row, 0));
+}
+
+function mergeProducts(primary: ProductContext[], secondary: ProductContext[]): ProductContext[] {
+  const productsById = new Map<string, ProductContext>();
+
+  for (const product of [...primary, ...secondary]) {
+    const existingProduct = productsById.get(product.id);
+
+    if (!existingProduct || product.vector_score > existingProduct.vector_score) {
+      productsById.set(product.id, product);
+    }
+  }
+
+  return [...productsById.values()];
+}
+
 function rowToProductContext(row: ProductRow, score: number): ProductContext {
   return {
     id: row.id,
@@ -535,37 +619,43 @@ function selectProductsForMessage(message: string, products: ProductContext[]): 
 }
 
 function filterProductsByRequestedKind(message: string, products: ProductContext[]): ProductContext[] {
-  const kind = detectRequestedProductKind(normalizeIntentText(message));
+  const kinds = detectRequestedProductKinds(normalizeIntentText(message));
 
-  if (!kind) {
+  if (kinds.length === 0) {
     return products;
   }
 
-  return products.filter((product) => productMatchesKind(product, kind));
+  return products.filter((product) => kinds.some((kind) => productMatchesKind(product, kind)));
 }
 
 function detectRequestedProductKind(text: string): "tee" | "shoe" | "pants" | "outerwear" | "bag" | null {
-  if (/半袖|短袖|t恤|tee|圆领|polo衫|上衣/.test(text)) {
-    return "tee";
-  }
+  return detectRequestedProductKinds(text)[0] ?? null;
+}
+
+function detectRequestedProductKinds(text: string): Array<"tee" | "shoe" | "pants" | "outerwear" | "bag"> {
+  const kinds: Array<"tee" | "shoe" | "pants" | "outerwear" | "bag"> = [];
 
   if (/跑鞋|运动鞋|篮球鞋|足球鞋|板鞋|德训鞋|鞋子|鞋|靴|凉鞋/.test(text)) {
-    return "shoe";
+    kinds.push("shoe");
+  }
+
+  if (/半袖|短袖|t恤|tee|圆领|polo衫|上衣/.test(text)) {
+    kinds.push("tee");
   }
 
   if (/运动裤|短裤|长裤|裤子|裤/.test(text)) {
-    return "pants";
+    kinds.push("pants");
   }
 
   if (/外套|夹克|冲锋衣|卫衣|风衣|羽绒服/.test(text)) {
-    return "outerwear";
+    kinds.push("outerwear");
   }
 
   if (/背包|斜挎包|单肩包|托特包|包包|包/.test(text)) {
-    return "bag";
+    kinds.push("bag");
   }
 
-  return null;
+  return kinds;
 }
 
 function productMatchesKind(product: ProductContext, kind: NonNullable<ReturnType<typeof detectRequestedProductKind>>): boolean {
@@ -604,6 +694,175 @@ function extractCnyBudget(message: string): number | null {
   }
 
   return null;
+}
+
+function buildLexicalSearchTerms(message: string): string[] {
+  const normalized = normalizeIntentText(message);
+  const terms = new Set<string>();
+  const knownTerms = [
+    "半袖",
+    "短袖",
+    "t恤",
+    "tee",
+    "圆领",
+    "polo",
+    "上衣",
+    "跑鞋",
+    "运动鞋",
+    "篮球鞋",
+    "足球鞋",
+    "板鞋",
+    "德训鞋",
+    "鞋",
+    "运动裤",
+    "短裤",
+    "长裤",
+    "裤",
+    "外套",
+    "夹克",
+    "卫衣",
+    "背包",
+    "包",
+    "通勤",
+    "跑步",
+    "户外",
+    "健身",
+    "训练",
+    "篮球",
+    "足球",
+    "日常",
+    "休闲",
+    "透气",
+    "速干",
+    "轻便",
+    "防水",
+    "保暖",
+    "adidas",
+    "阿迪达斯",
+    "nike",
+    "耐克",
+    "uniqlo",
+    "优衣库",
+    "muji",
+    "无印良品",
+    "ikea",
+    "宜家",
+  ];
+
+  for (const term of knownTerms) {
+    if (normalized.includes(term)) {
+      terms.add(term);
+    }
+  }
+
+  for (const kind of detectRequestedProductKinds(normalized)) {
+    for (const term of productKindSearchTerms(kind)) {
+      terms.add(term);
+    }
+  }
+
+  for (const code of message.toLowerCase().match(/[a-z0-9][a-z0-9_-]{2,}/g) ?? []) {
+    if (!/^\d+$/.test(code)) {
+      terms.add(code);
+    }
+  }
+
+  for (const chunk of message.toLowerCase().split(/[，,。.!！?？；;\s]+/)) {
+    const cleaned = chunk.replace(/\d+(?:\.\d+)?(?:元|块|rmb|cny)?/gi, "").trim();
+
+    if (cleaned.length >= 2 && cleaned.length <= 24 && !isGenericSearchChunk(cleaned)) {
+      terms.add(cleaned);
+    }
+  }
+
+  return [...terms];
+}
+
+function productKindSearchTerms(kind: NonNullable<ReturnType<typeof detectRequestedProductKind>>): string[] {
+  switch (kind) {
+    case "tee":
+      return ["半袖", "短袖", "t恤", "tee", "圆领", "polo", "上衣"];
+    case "shoe":
+      return ["鞋", "跑鞋", "运动鞋", "篮球鞋", "足球鞋", "板鞋"];
+    case "pants":
+      return ["裤", "运动裤", "短裤", "长裤"];
+    case "outerwear":
+      return ["外套", "夹克", "卫衣", "冲锋衣"];
+    case "bag":
+      return ["包", "背包", "斜挎包", "单肩包"];
+  }
+}
+
+function isGenericSearchChunk(value: string): boolean {
+  return /^(推荐|想买|想找|想看|看看|有没有|买|选|需要|预算|男生|女生|男士|女士|中性|以内|以下|左右|上下)$/.test(value);
+}
+
+function rankProductsForMessage(message: string, products: ProductContext[]): ProductContext[] {
+  const budget = extractCnyBudget(message);
+  const kinds = detectRequestedProductKinds(normalizeIntentText(message));
+  const terms = buildLexicalSearchTerms(message);
+
+  return [...products].sort((left, right) => {
+    const rightScore = scoreProductForMessage(right, message, terms, kinds, budget);
+    const leftScore = scoreProductForMessage(left, message, terms, kinds, budget);
+
+    if (rightScore !== leftScore) {
+      return rightScore - leftScore;
+    }
+
+    if (budget) {
+      return Math.abs((left.price || budget) - budget) - Math.abs((right.price || budget) - budget);
+    }
+
+    return left.name.localeCompare(right.name, "zh-Hans-CN");
+  });
+}
+
+function scoreProductForMessage(
+  product: ProductContext,
+  message: string,
+  terms: string[],
+  kinds: Array<"tee" | "shoe" | "pants" | "outerwear" | "bag">,
+  budget: number | null,
+): number {
+  const productText = normalizeIntentText(
+    `${product.id} ${product.name} ${product.brand} ${product.description} ${product.ideal_for.join(" ")} ${product.avoid_for.join(" ")}`,
+  );
+  let score = product.vector_score * 80;
+
+  for (const term of terms) {
+    const normalizedTerm = normalizeIntentText(term);
+
+    if (!normalizedTerm) {
+      continue;
+    }
+
+    if (normalizeIntentText(product.name).includes(normalizedTerm)) {
+      score += 14;
+    } else if (productText.includes(normalizedTerm)) {
+      score += 5;
+    }
+  }
+
+  if (productText.includes(normalizeIntentText(message))) {
+    score += 20;
+  }
+
+  if (kinds.some((kind) => productMatchesKind(product, kind))) {
+    score += 35;
+  }
+
+  if (budget && product.price > 0) {
+    score += product.price <= budget ? 18 : -80;
+  }
+
+  const scene = getSceneLabel(message);
+
+  if (scene && productText.includes(normalizeIntentText(scene))) {
+    score += 8;
+  }
+
+  return score;
 }
 
 function getClarificationReply(message: string): string | null {
@@ -702,105 +961,7 @@ function hashUtf8ToBase36(value: string): string {
   return hash.toString(36);
 }
 
-async function summarizeRecommendation(
-  env: Env,
-  message: string,
-  products: ProductContext[],
-): Promise<ChatResponse> {
-  const response = (await env.AI.run(LLM_MODEL, {
-    messages: [
-      {
-        role: "system",
-        content: [
-          "你是一个专业、克制、有审美判断力的零售智能导购，不限定任何单一品牌。",
-          "请根据 D1 中检索出来的真实商品列表 Context，结合用户的实际提问意图，从中精选出一个最符合需求的商品。",
-          "如果 Context 中有不同品牌，brand 必须使用商品真实品牌；不要自称某个品牌的专属导购。",
-          "必须严格保持真实数据的 id、image 和 url 的一致性，绝对不允许凭空胡编乱造、杜绝大模型幻觉。",
-          "导购话术要像真人顾问的具体判断，不要说“亲爱的用户”“欢迎来到”“为您推荐以下商品”“直接购买”。",
-          "如果推荐理由和用户预算冲突，必须优先尊重预算，不要硬推超预算商品。",
-          "只返回纯 JSON 对象，不要包含任何 ```json 这样的 markdown 包裹外壳，也不要有多余的废话前缀。",
-        ].join("\n"),
-      },
-      {
-        role: "user",
-        content: buildRecommendationPrompt(message, products),
-      },
-    ],
-    max_tokens: 900,
-    temperature: 0.2,
-    response_format: { type: "json_object" },
-  })) as AiTextResponse;
-
-  return parseLlmJson(response.response ?? "");
-}
-
-function buildRecommendationPrompt(message: string, products: ProductContext[]): string {
-  return [
-    `用户提问: ${message}`,
-    "",
-    "Context 商品列表，所有推荐字段必须从这里选择，不允许新增商品:",
-    JSON.stringify(products, null, 2),
-    "",
-    "请输出如下 JSON Schema:",
-    JSON.stringify(
-      {
-        chat_reply: "导购对用户说的一句热情开场白...",
-        recommended_product: {
-          id: "商品的真实ID",
-          name: "商品名称",
-          brand: "商品真实品牌",
-          price_display: "CNY 299",
-          image: "从数据库捞出来的真实图片URL",
-          url: "从数据库捞出来的真实官网URL",
-          why_buy: "一句话提炼：为什么优先看它？结合用户需求给出最痛点的理由。",
-          ideal_for: ["适合人群标签1", "适合人群标签2"],
-          avoid_for: ["避坑/建议先不买的人群标签1", "标签2"],
-          next_step_tip: "下一步怎么选的引导文案...",
-        },
-      },
-      null,
-      2,
-    ),
-  ].join("\n");
-}
-
-function parseLlmJson(rawText: string): ChatResponse {
-  const cleaned = stripMarkdownJson(rawText.trim());
-
-  try {
-    return JSON.parse(cleaned) as ChatResponse;
-  } catch {
-    const firstBrace = cleaned.indexOf("{");
-    const lastBrace = cleaned.lastIndexOf("}");
-
-    if (firstBrace >= 0 && lastBrace > firstBrace) {
-      return JSON.parse(cleaned.slice(firstBrace, lastBrace + 1)) as ChatResponse;
-    }
-
-    throw new Error("LLM did not return valid JSON.");
-  }
-}
-
-function stripMarkdownJson(value: string): string {
-  return value
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```$/i, "")
-    .trim();
-}
-
-function sanitizeChatResponse(
-  response: ChatResponse,
-  products: ProductContext[],
-  message: string,
-): ChatResponse {
-  const product = response.recommended_product;
-
-  if (!product) {
-    return buildNoMatchResponse(response.chat_reply);
-  }
-
-  const source = products.find((item) => item.id === product.id) ?? products[0];
-
+function buildRecommendationResponse(message: string, source: ProductContext): ChatResponse {
   return {
     chat_reply: buildDeterministicChatReply(source),
     recommended_product: {
@@ -811,8 +972,8 @@ function sanitizeChatResponse(
       image: source.image,
       url: source.url,
       why_buy: buildDeterministicWhyBuy(message, source),
-      ideal_for: preferNonEmptyStringArray(product.ideal_for, source.ideal_for),
-      avoid_for: preferNonEmptyStringArray(product.avoid_for, source.avoid_for),
+      ideal_for: source.ideal_for,
+      avoid_for: source.avoid_for,
       next_step_tip: buildDeterministicNextStep(source),
     },
     stage: "rag_recommendation",
