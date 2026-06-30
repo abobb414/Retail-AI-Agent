@@ -95,6 +95,9 @@ export function useChat() {
     })
     draft.value = ''
     activeRecommendation.value = null
+    messages.value = messages.value.map((message) =>
+      message.recommendation ? { ...message, recommendation: null } : message,
+    )
 
     const requestMessages = messages.value.map(({ role, content }) => ({ role, content }))
     const assistantMessage: ChatMessage = {

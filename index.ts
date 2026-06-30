@@ -117,6 +117,8 @@ type ChatResponse = {
   stage?: "clarify_slots" | "rag_recommendation" | "no_vector_match";
 };
 
+type AudiencePreference = "male" | "female" | "child" | "pet" | null;
+
 class HttpError extends Error {
   constructor(
     public readonly status: number,
@@ -522,7 +524,8 @@ async function safeProductSearch(
 }
 
 function selectCandidateProducts(message: string, products: ProductContext[]): ProductContext[] {
-  const kindFilteredProducts = filterProductsByRequestedKind(message, products);
+  const audienceFilteredProducts = filterProductsByAudience(message, products);
+  const kindFilteredProducts = filterProductsByRequestedKind(message, audienceFilteredProducts);
   const budgetFilteredProducts = selectProductsForMessage(message, kindFilteredProducts);
 
   return extractCnyBudget(message) ? budgetFilteredProducts : kindFilteredProducts;
@@ -618,6 +621,16 @@ function selectProductsForMessage(message: string, products: ProductContext[]): 
   return products.filter((product) => product.price > 0 && product.price <= budget);
 }
 
+function filterProductsByAudience(message: string, products: ProductContext[]): ProductContext[] {
+  const audience = detectAudiencePreference(normalizeIntentText(message));
+
+  if (!audience) {
+    return products.filter((product) => !productLooksPetOnly(product));
+  }
+
+  return products.filter((product) => productMatchesAudience(product, audience));
+}
+
 function filterProductsByRequestedKind(message: string, products: ProductContext[]): ProductContext[] {
   const kinds = detectRequestedProductKinds(normalizeIntentText(message));
 
@@ -673,6 +686,71 @@ function productMatchesKind(product: ProductContext, kind: NonNullable<ReturnTyp
     case "bag":
       return /背包|斜挎包|单肩包|托特包|包/.test(text) && !/鞋|裤/.test(text);
   }
+}
+
+function detectAudiencePreference(text: string): AudiencePreference {
+  if (/宠物|猫|狗/.test(text)) {
+    return "pet";
+  }
+
+  if (/儿童|孩子|小孩|宝宝|婴儿|幼儿|童装|男童|女童/.test(text)) {
+    return "child";
+  }
+
+  if (/女士|女生|女子|女款|女性|女装|women|womens|woman/.test(text)) {
+    return "female";
+  }
+
+  if (/男士|男生|男子|男款|男性|男装|(^|[^a-z])(?:men|mens|man)([^a-z]|$)/.test(text)) {
+    return "male";
+  }
+
+  return null;
+}
+
+function productMatchesAudience(product: ProductContext, audience: NonNullable<AudiencePreference>): boolean {
+  const text = getProductAudienceText(product);
+
+  switch (audience) {
+    case "male":
+      return !productLooksChildOnly(text) && !productLooksPetOnly(product) && !productLooksFemaleOnly(text);
+    case "female":
+      return !productLooksChildOnly(text) && !productLooksPetOnly(product) && !productLooksMaleOnly(text);
+    case "child":
+      return productLooksChildOnly(text);
+    case "pet":
+      return productLooksPetOnly(product);
+  }
+}
+
+function getProductAudienceText(product: ProductContext): string {
+  return normalizeIntentText(
+    `${product.name} ${product.description} ${product.brand} ${product.ideal_for.join(" ")} ${product.avoid_for.join(" ")}`,
+  );
+}
+
+function productLooksChildOnly(text: string): boolean {
+  return /儿童|孩子|宝宝|婴儿|幼儿|童装|男童|女童|110cm|120cm|130cm|140cm|150cm|160cm/.test(text);
+}
+
+function productLooksPetOnly(product: ProductContext): boolean {
+  return /宠物|猫|狗/.test(getProductAudienceText(product));
+}
+
+function productLooksFemaleOnly(text: string): boolean {
+  if (/男士\/女士|女士\/男士|男女|男\/女|中性|unisex/.test(text)) {
+    return false;
+  }
+
+  return /女士|女生|女子|女款|女性|女装|连衣裙|半身裙|裙装|文胸|胸衣|bra|women|womens|woman/.test(text);
+}
+
+function productLooksMaleOnly(text: string): boolean {
+  if (/男士\/女士|女士\/男士|男女|男\/女|中性|unisex/.test(text)) {
+    return false;
+  }
+
+  return /男士|男生|男子|男款|男性|男装|(^|[^a-z])(?:men|mens|man)([^a-z]|$)/.test(text);
 }
 
 function extractCnyBudget(message: string): number | null {
@@ -747,6 +825,16 @@ function buildLexicalSearchTerms(message: string): string[] {
     "无印良品",
     "ikea",
     "宜家",
+    "男士",
+    "男生",
+    "男子",
+    "男款",
+    "女士",
+    "女生",
+    "女子",
+    "女款",
+    "儿童",
+    "童装",
   ];
 
   for (const term of knownTerms) {
@@ -854,6 +942,12 @@ function scoreProductForMessage(
 
   if (budget && product.price > 0) {
     score += product.price <= budget ? 18 : -80;
+  }
+
+  const audience = detectAudiencePreference(normalizeIntentText(message));
+
+  if (audience && productMatchesAudience(product, audience)) {
+    score += 24;
   }
 
   const scene = getSceneLabel(message);
