@@ -25,6 +25,7 @@ interface WorkerRecommendedProduct {
 interface WorkerChatResponse {
   chat_reply: string
   recommended_product: WorkerRecommendedProduct | null
+  stage?: 'clarify_slots' | 'rag_recommendation' | 'no_vector_match'
 }
 
 function getLatestUserText(messages: IncomingMessage[]) {
@@ -33,6 +34,19 @@ function getLatestUserText(messages: IncomingMessage[]) {
     .find((message) => message.role === 'user')
     ?.content
     .trim() ?? ''
+}
+
+function buildWorkerMessage(messages: IncomingMessage[]) {
+  const userMessages = messages
+    .filter((message) => message.role === 'user')
+    .map((message) => message.content.trim())
+    .filter(Boolean)
+
+  if (userMessages.length === 0) {
+    return ''
+  }
+
+  return userMessages.slice(-4).join('；')
 }
 
 function writeEvent(event: H3Event, name: string, data: unknown) {
@@ -175,6 +189,7 @@ export default defineEventHandler(async (event) => {
   const body = await readBody<ChatRequest>(event)
   const messages = body.messages ?? []
   const latestUserText = getLatestUserText(messages)
+  const workerMessage = buildWorkerMessage(messages)
 
   event.node.res.setHeader('Cache-Control', 'no-cache')
   event.node.res.setHeader('Connection', 'keep-alive')
@@ -198,7 +213,7 @@ export default defineEventHandler(async (event) => {
     const workerResponse = await postWorkerChat(
       config.workerChatUrl,
       config.workerResolveIp,
-      { message: latestUserText },
+      { message: workerMessage || latestUserText },
     )
 
     writeEvent(event, 'chunk', { text: workerResponse.chat_reply })
@@ -211,7 +226,7 @@ export default defineEventHandler(async (event) => {
 
     writeEvent(event, 'meta', {
       mode: 'cloudflare_worker',
-      stage: workerResponse.recommended_product ? 'rag_recommendation' : 'no_vector_match',
+      stage: workerResponse.stage ?? (workerResponse.recommended_product ? 'rag_recommendation' : 'no_vector_match'),
       profile_summary: [],
     })
     writeEvent(event, 'done', { source: 'cloudflare_worker' })

@@ -118,6 +118,7 @@ type RecommendedProduct = {
 type ChatResponse = {
   chat_reply: string;
   recommended_product: RecommendedProduct | null;
+  stage?: "clarify_slots" | "rag_recommendation" | "no_vector_match";
 };
 
 class HttpError extends Error {
@@ -188,6 +189,19 @@ async function handleChat(request: Request, env: Env): Promise<Response> {
   }
 
   const payload = validateChatPayload(await parseJsonBody(request));
+  const clarificationReply = getClarificationReply(payload.message);
+
+  if (clarificationReply) {
+    return jsonResponse(
+      {
+        chat_reply: clarificationReply,
+        recommended_product: null,
+        stage: "clarify_slots",
+      },
+      200,
+    );
+  }
+
   const queryVector = await generateSingleEmbedding(env, payload.message);
   const vectorMatches = await env.VECTOR_INDEX.query(queryVector, {
     topK: VECTOR_TOP_K,
@@ -317,7 +331,7 @@ function validateRawProduct(item: unknown, index: number): RawProduct {
   return {
     id: product.id,
     name: product.name,
-    brand: typeof product.brand === "string" ? product.brand : "Adidas",
+    brand: typeof product.brand === "string" ? product.brand : "",
     price_range: typeof product.price_range === "string" ? product.price_range : "",
     source_url: typeof product.source_url === "string" ? product.source_url : "",
     image: typeof product.image === "string" ? product.image : "",
@@ -337,7 +351,7 @@ function cleanProduct(item: RawProduct): CleanProduct {
     id: item.id,
     vectorId: createVectorId(item.id),
     name: item.name.trim(),
-    brand: item.brand?.trim() || "Adidas",
+    brand: item.brand?.trim() || inferBrand(item),
     price: parsePrice(priceDisplay),
     priceDisplay,
     url: item.source_url?.trim() ?? "",
@@ -498,7 +512,7 @@ function rowToProductContext(row: ProductRow, score: number): ProductContext {
     id: row.id,
     vector_id: row.vector_id || row.id,
     name: row.name,
-    brand: row.brand || "Adidas",
+    brand: row.brand || inferBrand(row),
     price: typeof row.price === "number" ? row.price : 0,
     price_display: row.price_display || formatPrice(row.price),
     url: row.url || "",
@@ -540,6 +554,83 @@ function extractCnyBudget(message: string): number | null {
   return null;
 }
 
+function getClarificationReply(message: string): string | null {
+  const text = normalizeIntentText(message);
+  const category = detectRequestCategory(text);
+  const hasBudget = extractCnyBudget(message) !== null || /预算|便宜|贵|高端|入门|性价比/.test(text);
+  const hasGenderOrRecipient = /男|女|中性|儿童|孩子|宝宝|老人|宠物|送人|自用|自己/.test(text);
+  const hasScene = /通勤|上班|办公室|跑步|健身|训练|篮球|足球|户外|旅行|出差|上学|夏天|冬天|春秋|卧室|客厅|厨房|书房|餐厅|小户型|宿舍|日常|居家|运动|工作|睡觉|收纳/.test(text);
+  const hasStyleOrSize = /舒服|舒适|透气|轻便|防水|保暖|宽松|修身|简约|正式|休闲|耐用|好看|质感|尺码|尺寸|码|平米|面积|容量/.test(text);
+
+  if (!category && /推荐|想买|想找|想看|看看|有没有|买|选|需要|预算/.test(text)) {
+    return "可以的，我先不急着推单品。你想看哪一类商品？顺便告诉我预算和使用场景，我再从真实商品库里挑。";
+  }
+
+  if (category === "wearable") {
+    const missing = [
+      !hasGenderOrRecipient ? "男士、女士、中性或尺码" : "",
+      !hasBudget ? "预算" : "",
+      !hasScene && !hasStyleOrSize ? "穿着场景，比如通勤、跑步、训练或日常" : "",
+    ].filter(Boolean);
+
+    if (missing.length > 0) {
+      return `我先确认一下，${missing.join("、")}大概是什么？这些信息够了以后，我再给你推具体款，不会硬塞不合适的商品。`;
+    }
+  }
+
+  if (category === "home") {
+    const missing = [
+      !hasScene ? "放在哪个空间或主要解决什么问题" : "",
+      !hasBudget ? "预算大概多少" : "",
+    ].filter(Boolean);
+
+    if (missing.length > 0) {
+      return `先问一句关键的：${missing.join("，")}？我确认后再推荐具体商品，会比直接推一件更稳。`;
+    }
+  }
+
+  if (category === "appliance") {
+    const missing = [
+      !hasScene && !hasStyleOrSize ? "使用场景、面积、容量或安装条件" : "",
+      !hasBudget ? "预算范围" : "",
+    ].filter(Boolean);
+
+    if (missing.length > 0) {
+      return `这类商品我建议先别盲推。${missing.join("，")}是什么？确认后我再帮你缩到一两个更靠谱的选择。`;
+    }
+  }
+
+  if (category === "living_context") {
+    return "这个场景可以做，但我先确认方向：你更想看灯光、收纳、床品、小家具，还是运动穿搭？再给我一个预算，我就能更像顾问一样帮你挑。";
+  }
+
+  return null;
+}
+
+function normalizeIntentText(message: string): string {
+  return message.toLowerCase().replace(/\s+/g, "");
+}
+
+function detectRequestCategory(text: string): "wearable" | "home" | "appliance" | "living_context" | null {
+  if (/鞋|跑鞋|运动鞋|篮球鞋|足球鞋|板鞋|凉鞋|靴|半袖|t恤|tee|上衣|裤|短裤|运动裤|外套|夹克|卫衣|衬衫|polo|裙|内衣|袜|帽|包/.test(text)) {
+    return "wearable";
+  }
+
+  if (/椅|桌|床(?!头)|柜|沙发|架|收纳|灯|照明|台灯|地毯|床品|枕|被|家具/.test(text)) {
+    return "home";
+  }
+
+  if (/空调|冰箱|洗衣机|洗碗机|烤箱|微波炉|咖啡机|吸尘器|扫地|电视|音箱|耳机|手机|电脑|电器|家电/.test(text)) {
+    return "appliance";
+  }
+
+  if (/卧室|客厅|厨房|书房|小户型|宿舍|通勤|运动|舒服|舒适|氛围|生活/.test(text)) {
+    return "living_context";
+  }
+
+  return null;
+}
+
 function createVectorId(productId: string): string {
   if (textEncoder.encode(productId).length <= 64) {
     return productId;
@@ -569,8 +660,9 @@ async function summarizeRecommendation(
       {
         role: "system",
         content: [
-          "你是一个专业的阿迪达斯金牌智能导购。",
+          "你是一个专业、克制、有审美判断力的零售智能导购，不限定任何单一品牌。",
           "请根据 D1 中检索出来的真实商品列表 Context，结合用户的实际提问意图，从中精选出一个最符合需求的商品。",
+          "如果 Context 中有不同品牌，brand 必须使用商品真实品牌；不要自称某个品牌的专属导购。",
           "必须严格保持真实数据的 id、image 和 url 的一致性，绝对不允许凭空胡编乱造、杜绝大模型幻觉。",
           "只返回纯 JSON 对象，不要包含任何 ```json 这样的 markdown 包裹外壳，也不要有多余的废话前缀。",
         ].join("\n"),
@@ -602,7 +694,7 @@ function buildRecommendationPrompt(message: string, products: ProductContext[]):
         recommended_product: {
           id: "商品的真实ID",
           name: "商品名称",
-          brand: "Adidas",
+          brand: "商品真实品牌",
           price_display: "CNY 299",
           image: "从数据库捞出来的真实图片URL",
           url: "从数据库捞出来的真实官网URL",
@@ -659,7 +751,7 @@ function sanitizeChatResponse(response: ChatResponse, products: ProductContext[]
     recommended_product: {
       id: source.id,
       name: source.name,
-      brand: source.brand || "Adidas",
+      brand: source.brand || "精选品牌",
       price_display: source.price_display,
       image: source.image,
       url: source.url,
@@ -683,6 +775,7 @@ function buildNoMatchResponse(chatReply?: string): ChatResponse {
       chatReply ||
       "我暂时没有在真实商品库里找到足够匹配的单品。你可以换个说法，比如告诉我预算、使用场景或想要的品类。",
     recommended_product: null,
+    stage: "no_vector_match",
   };
 }
 
@@ -690,6 +783,29 @@ function normalizeStringArray(value: unknown): string[] {
   return Array.isArray(value)
     ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
     : [];
+}
+
+function inferBrand(item: Pick<RawProduct, "id" | "name" | "source_url">): string {
+  const text = `${item.id} ${item.name} ${item.source_url ?? ""}`.toLowerCase();
+  const brandRules: Array<[RegExp, string]> = [
+    [/adidas|阿迪达斯/, "Adidas"],
+    [/nike|耐克/, "Nike"],
+    [/uniqlo|优衣库/, "Uniqlo"],
+    [/muji|无印良品/, "MUJI"],
+    [/ikea|宜家/, "IKEA"],
+    [/xiaomi|mi\.com|小米/, "Xiaomi"],
+    [/samsung|三星/, "Samsung"],
+    [/sony|索尼/, "Sony"],
+    [/apple|苹果/, "Apple"],
+  ];
+
+  for (const [pattern, brand] of brandRules) {
+    if (pattern.test(text)) {
+      return brand;
+    }
+  }
+
+  return "精选品牌";
 }
 
 function parseJsonStringArray(value: string | null): string[] {

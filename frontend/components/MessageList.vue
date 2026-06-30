@@ -26,7 +26,13 @@
           <span class="sr-only">{{ message.role === 'assistant' ? '顾问头像' : '用户头像' }}</span>
         </div>
 
-        <div class="max-w-[88%] space-y-3 sm:max-w-[84%]">
+        <div
+          class="message-stack space-y-3"
+          :class="[
+            message.role === 'user' ? 'user-stack' : 'assistant-stack',
+            message.recommendation ? 'has-recommendation' : '',
+          ]"
+        >
           <div
             class="message-bubble rounded-[24px] px-4 py-3 text-[15px] font-normal leading-7 shadow-[0_16px_36px_rgba(140,156,176,0.12)]"
             :class="message.role === 'assistant' ? 'assistant-bubble text-slate-700' : 'user-bubble text-slate-700'"
@@ -132,8 +138,41 @@ onMounted(scrollToBottom)
 }
 
 .message-bubble {
+  display: inline-block;
+  max-width: min(34rem, 100%);
   overflow: hidden;
   position: relative;
+  width: fit-content;
+}
+
+.message-stack {
+  align-items: flex-start;
+  display: flex;
+  flex-direction: column;
+  max-width: 88%;
+  min-width: 0;
+}
+
+.user-stack {
+  align-items: flex-end;
+}
+
+.assistant-stack {
+  align-items: flex-start;
+}
+
+.message-stack.has-recommendation {
+  width: min(34rem, 88%);
+}
+
+@media (min-width: 640px) {
+  .message-stack {
+    max-width: 84%;
+  }
+
+  .message-stack.has-recommendation {
+    width: min(34rem, 84%);
+  }
 }
 
 .assistant-bubble {
