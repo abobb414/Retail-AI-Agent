@@ -48,6 +48,10 @@ function applyServerEvent(rawEvent: string, assistantMessage: ChatMessage, state
     state.demoMode.value = data.mode === 'mock'
     if (data.stage) {
       state.conversationStage.value = data.stage
+      if (data.stage !== 'rag_recommendation') {
+        state.activeRecommendation.value = null
+        assistantMessage.recommendation = null
+      }
     }
     state.profileSummary.value = data.profile_summary ?? []
     return

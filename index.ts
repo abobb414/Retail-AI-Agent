@@ -217,7 +217,7 @@ async function handleChat(request: Request, env: Env): Promise<Response> {
 
   const products = selectProductsForMessage(
     payload.message,
-    await fetchProductsByVectorMatches(env, matches),
+    filterProductsByRequestedKind(payload.message, await fetchProductsByVectorMatches(env, matches)),
   ).slice(0, LLM_CONTEXT_LIMIT);
 
   if (products.length === 0) {
@@ -225,7 +225,7 @@ async function handleChat(request: Request, env: Env): Promise<Response> {
   }
 
   const llmResponse = await summarizeRecommendation(env, payload.message, products);
-  return jsonResponse(sanitizeChatResponse(llmResponse, products), 200);
+  return jsonResponse(sanitizeChatResponse(llmResponse, products, payload.message), 200);
 }
 
 async function handleIngest(request: Request, env: Env): Promise<Response> {
@@ -534,12 +534,64 @@ function selectProductsForMessage(message: string, products: ProductContext[]): 
   return products.filter((product) => product.price > 0 && product.price <= budget);
 }
 
+function filterProductsByRequestedKind(message: string, products: ProductContext[]): ProductContext[] {
+  const kind = detectRequestedProductKind(normalizeIntentText(message));
+
+  if (!kind) {
+    return products;
+  }
+
+  return products.filter((product) => productMatchesKind(product, kind));
+}
+
+function detectRequestedProductKind(text: string): "tee" | "shoe" | "pants" | "outerwear" | "bag" | null {
+  if (/半袖|短袖|t恤|tee|圆领|polo衫|上衣/.test(text)) {
+    return "tee";
+  }
+
+  if (/跑鞋|运动鞋|篮球鞋|足球鞋|板鞋|德训鞋|鞋子|鞋|靴|凉鞋/.test(text)) {
+    return "shoe";
+  }
+
+  if (/运动裤|短裤|长裤|裤子|裤/.test(text)) {
+    return "pants";
+  }
+
+  if (/外套|夹克|冲锋衣|卫衣|风衣|羽绒服/.test(text)) {
+    return "outerwear";
+  }
+
+  if (/背包|斜挎包|单肩包|托特包|包包|包/.test(text)) {
+    return "bag";
+  }
+
+  return null;
+}
+
+function productMatchesKind(product: ProductContext, kind: NonNullable<ReturnType<typeof detectRequestedProductKind>>): boolean {
+  const text = normalizeIntentText(`${product.name} ${product.description} ${product.brand}`);
+
+  switch (kind) {
+    case "tee":
+      return /半袖|短袖|t恤|tee|圆领|polo衫|上衣/.test(text) && !/鞋|靴|裤|裙|帽|包|手套/.test(text);
+    case "shoe":
+      return /跑鞋|运动鞋|篮球鞋|足球鞋|板鞋|德训鞋|鞋|靴|凉鞋/.test(text);
+    case "pants":
+      return /运动裤|短裤|长裤|裤/.test(text) && !/鞋|包|帽|手套/.test(text);
+    case "outerwear":
+      return /外套|夹克|冲锋衣|卫衣|风衣|羽绒服/.test(text);
+    case "bag":
+      return /背包|斜挎包|单肩包|托特包|包/.test(text) && !/鞋|裤/.test(text);
+  }
+}
+
 function extractCnyBudget(message: string): number | null {
   const normalized = message.replace(/[,，]/g, "");
   const patterns = [
-    /预算\s*(?:在|是|大概|约|为)?\s*(\d+(?:\.\d+)?)\s*(?:元|块|rmb|cny)?\s*(?:以内|以下|内)?/i,
-    /(\d+(?:\.\d+)?)\s*(?:元|块|rmb|cny)?\s*(?:以内|以下|内)/i,
-    /不超过\s*(\d+(?:\.\d+)?)\s*(?:元|块|rmb|cny)?/i,
+    /预算\s*(?:在|是|大概|约|为|控制在)?\s*(\d+(?:\.\d+)?)\s*(?:元|块|rmb|cny)?\s*(?:左右|上下|附近|以内|以下|内)?/i,
+    /(?:价位|价格|预算|控制在|不超过|别超过)\D{0,8}(\d+(?:\.\d+)?)\s*(?:元|块|rmb|cny)?/i,
+    /(\d+(?:\.\d+)?)\s*(?:元|块|rmb|cny)\s*(?:左右|上下|附近|以内|以下|内)?/i,
+    /(\d+(?:\.\d+)?)\s*(?:左右|上下|以内|以下|内)/i,
   ];
 
   for (const pattern of patterns) {
@@ -570,11 +622,11 @@ function getClarificationReply(message: string): string | null {
     const missing = [
       !hasGenderOrRecipient ? "男士、女士、中性或尺码" : "",
       !hasBudget ? "预算" : "",
-      !hasScene && !hasStyleOrSize ? "穿着场景，比如通勤、跑步、训练或日常" : "",
+      !hasScene && !hasStyleOrSize ? "穿着场景" : "",
     ].filter(Boolean);
 
     if (missing.length > 0) {
-      return `我先确认一下，${missing.join("、")}大概是什么？这些信息够了以后，我再给你推具体款，不会硬塞不合适的商品。`;
+      return `还差一点关键信息：${missing.join("、")}。补一句就行，比如“男士 300 元，户外跑步”。`;
     }
   }
 
@@ -585,7 +637,7 @@ function getClarificationReply(message: string): string | null {
     ].filter(Boolean);
 
     if (missing.length > 0) {
-      return `先问一句关键的：${missing.join("，")}？我确认后再推荐具体商品，会比直接推一件更稳。`;
+      return `还差一点关键信息：${missing.join("，")}。补一句后我再给你推具体款。`;
     }
   }
 
@@ -596,7 +648,7 @@ function getClarificationReply(message: string): string | null {
     ].filter(Boolean);
 
     if (missing.length > 0) {
-      return `这类商品我建议先别盲推。${missing.join("，")}是什么？确认后我再帮你缩到一两个更靠谱的选择。`;
+      return `这类商品先别盲推，还差：${missing.join("，")}。补一句后我再帮你缩到具体选择。`;
     }
   }
 
@@ -664,6 +716,8 @@ async function summarizeRecommendation(
           "请根据 D1 中检索出来的真实商品列表 Context，结合用户的实际提问意图，从中精选出一个最符合需求的商品。",
           "如果 Context 中有不同品牌，brand 必须使用商品真实品牌；不要自称某个品牌的专属导购。",
           "必须严格保持真实数据的 id、image 和 url 的一致性，绝对不允许凭空胡编乱造、杜绝大模型幻觉。",
+          "导购话术要像真人顾问的具体判断，不要说“亲爱的用户”“欢迎来到”“为您推荐以下商品”“直接购买”。",
+          "如果推荐理由和用户预算冲突，必须优先尊重预算，不要硬推超预算商品。",
           "只返回纯 JSON 对象，不要包含任何 ```json 这样的 markdown 包裹外壳，也不要有多余的废话前缀。",
         ].join("\n"),
       },
@@ -734,7 +788,11 @@ function stripMarkdownJson(value: string): string {
     .trim();
 }
 
-function sanitizeChatResponse(response: ChatResponse, products: ProductContext[]): ChatResponse {
+function sanitizeChatResponse(
+  response: ChatResponse,
+  products: ProductContext[],
+  message: string,
+): ChatResponse {
   const product = response.recommended_product;
 
   if (!product) {
@@ -744,10 +802,7 @@ function sanitizeChatResponse(response: ChatResponse, products: ProductContext[]
   const source = products.find((item) => item.id === product.id) ?? products[0];
 
   return {
-    chat_reply:
-      typeof response.chat_reply === "string" && response.chat_reply.trim()
-        ? response.chat_reply.trim()
-        : "我帮你从真实商品库里挑了一款更贴近需求的单品。",
+    chat_reply: buildDeterministicChatReply(source),
     recommended_product: {
       id: source.id,
       name: source.name,
@@ -755,18 +810,92 @@ function sanitizeChatResponse(response: ChatResponse, products: ProductContext[]
       price_display: source.price_display,
       image: source.image,
       url: source.url,
-      why_buy:
-        typeof product.why_buy === "string" && product.why_buy.trim()
-          ? product.why_buy.trim()
-          : "它和你的需求匹配度最高，适合作为优先对比款。",
+      why_buy: buildDeterministicWhyBuy(message, source),
       ideal_for: preferNonEmptyStringArray(product.ideal_for, source.ideal_for),
       avoid_for: preferNonEmptyStringArray(product.avoid_for, source.avoid_for),
-      next_step_tip:
-        typeof product.next_step_tip === "string" && product.next_step_tip.trim()
-          ? product.next_step_tip.trim()
-          : "建议点进官网查看尺码、库存和更多实拍细节后再决定。",
+      next_step_tip: buildDeterministicNextStep(source),
     },
+    stage: "rag_recommendation",
   };
+}
+
+function buildDeterministicChatReply(product: ProductContext): string {
+  return `这款 ${product.name} 更贴近你刚才补充的条件，可以先作为第一候选看。`;
+}
+
+function buildDeterministicWhyBuy(message: string, product: ProductContext): string {
+  const kind = detectRequestedProductKind(normalizeIntentText(message));
+  const budget = extractCnyBudget(message);
+  const scene = getSceneLabel(message);
+  const kindLabel = kind ? productKindLabel(kind) : "这个品类";
+  const budgetText = budget ? `价格没有超过 ${budget} 元预算` : "价格和需求比较匹配";
+  const sceneText = scene ? `，也贴合${scene}` : "";
+
+  return `它是${kindLabel}，${budgetText}${sceneText}，比只按关键词硬推更稳。`;
+}
+
+function buildDeterministicNextStep(product: ProductContext): string {
+  return product.url
+    ? "下一步先看官网尺码、库存和实拍细节，再决定是否下单。"
+    : "下一步先确认尺码、库存和实拍细节，再决定是否下单。";
+}
+
+function productKindLabel(kind: NonNullable<ReturnType<typeof detectRequestedProductKind>>): string {
+  switch (kind) {
+    case "tee":
+      return "短袖上衣";
+    case "shoe":
+      return "鞋类单品";
+    case "pants":
+      return "裤装";
+    case "outerwear":
+      return "外套";
+    case "bag":
+      return "包袋";
+  }
+}
+
+function getSceneLabel(message: string): string {
+  const text = normalizeIntentText(message);
+
+  if (/户外.*跑|跑步|越野/.test(text)) {
+    return "户外跑步";
+  }
+
+  if (/通勤|上班|办公室/.test(text)) {
+    return "通勤";
+  }
+
+  if (/健身|训练|运动/.test(text)) {
+    return "运动训练";
+  }
+
+  if (/日常|休闲/.test(text)) {
+    return "日常穿着";
+  }
+
+  return "";
+}
+
+function isUsableConsultantText(value: unknown): value is string {
+  if (typeof value !== "string") {
+    return false;
+  }
+
+  const text = cleanConsultantText(value);
+  return text.length >= 8 && !/(?:或者|以及|和|或|、|，|,|：|:|；|;)$/.test(text);
+}
+
+function cleanConsultantText(value: string): string {
+  return value
+    .replace(/您/g, "你")
+    .replace(/^(您好|你好|嗨|哈喽)[，,。!！\s]*/g, "")
+    .replace(/亲爱的用户[，,。!！\s]*/g, "")
+    .replace(/欢迎来到[^，,。!！]*[，,。!！\s]*/g, "")
+    .replace(/(?:我|我们)?为您推荐(?:以下)?(?:的)?商品(?:是)?[：:，,。!！\s]*/g, "")
+    .replace(/(?:我|我们)?推荐(?:的)?(?:商品)?(?:是)?[：:，,。!！\s]*/g, "")
+    .replace(/(?:可以)?直接购买[，,。!！\s]*/g, "")
+    .trim();
 }
 
 function buildNoMatchResponse(chatReply?: string): ChatResponse {
