@@ -102,6 +102,7 @@ type RecommendedProduct = {
   id: string;
   name: string;
   brand: string;
+  category: string;
   price_display: string;
   image: string;
   url: string;
@@ -132,7 +133,7 @@ const EMBEDDING_MODEL = "@cf/baai/bge-m3";
 const EMBEDDING_DIMENSIONS = 1024;
 const INGEST_BATCH_SIZE = 8;
 const VECTOR_TOP_K = 20;
-const LEXICAL_TOP_K = 30;
+const LEXICAL_TOP_K = 120;
 const textEncoder = new TextEncoder();
 
 const jsonHeaders = {
@@ -697,11 +698,11 @@ function detectAudiencePreference(text: string): AudiencePreference {
     return "child";
   }
 
-  if (/女士|女生|女子|女款|女性|女装|women|womens|woman/.test(text)) {
+  if (/女士|女生|女子|女款|女式|女性|女装|women|womens|woman/.test(text)) {
     return "female";
   }
 
-  if (/男士|男生|男子|男款|男性|男装|(^|[^a-z])(?:men|mens|man)([^a-z]|$)/.test(text)) {
+  if (/男士|男生|男子|男款|男式|男性|男装|(^|[^a-z])(?:men|mens|man)([^a-z]|$)/.test(text)) {
     return "male";
   }
 
@@ -742,7 +743,7 @@ function productLooksFemaleOnly(text: string): boolean {
     return false;
   }
 
-  return /女士|女生|女子|女款|女性|女装|连衣裙|半身裙|裙装|文胸|胸衣|bra|women|womens|woman/.test(text);
+  return /女士|女生|女子|女款|女式|女性|女装|连衣裙|半身裙|裙装|文胸|胸衣|bra|women|womens|woman/.test(text);
 }
 
 function productLooksMaleOnly(text: string): boolean {
@@ -750,28 +751,35 @@ function productLooksMaleOnly(text: string): boolean {
     return false;
   }
 
-  return /男士|男生|男子|男款|男性|男装|(^|[^a-z])(?:men|mens|man)([^a-z]|$)/.test(text);
+  return /男士|男生|男子|男款|男式|男性|男装|(^|[^a-z])(?:men|mens|man)([^a-z]|$)/.test(text);
 }
 
 function extractCnyBudget(message: string): number | null {
   const normalized = message.replace(/[,，]/g, "");
   const patterns = [
-    /预算\s*(?:在|是|大概|约|为|控制在)?\s*(\d+(?:\.\d+)?)\s*(?:元|块|rmb|cny)?\s*(?:左右|上下|附近|以内|以下|内)?/i,
-    /(?:价位|价格|预算|控制在|不超过|别超过)\D{0,8}(\d+(?:\.\d+)?)\s*(?:元|块|rmb|cny)?/i,
-    /(\d+(?:\.\d+)?)\s*(?:元|块|rmb|cny)\s*(?:左右|上下|附近|以内|以下|内)?/i,
-    /(\d+(?:\.\d+)?)\s*(?:左右|上下|以内|以下|内)/i,
+    /预算\s*(?:在|是|大概|约|为|控制在)?\s*(\d+(?:\.\d+)?)\s*(?:元|块|rmb|cny)?\s*(?:左右|上下|附近|以内|以下|内)?/gi,
+    /(?:价位|价格|预算|控制在|不超过|别超过)\D{0,8}(\d+(?:\.\d+)?)\s*(?:元|块|rmb|cny)?/gi,
+    /(\d+(?:\.\d+)?)\s*(?:元|块|rmb|cny)\s*(?:左右|上下|附近|以内|以下|内)?/gi,
+    /(\d+(?:\.\d+)?)\s*(?:左右|上下|以内|以下|内)/gi,
   ];
+  const matches: Array<{ index: number; value: number }> = [];
 
   for (const pattern of patterns) {
-    const match = normalized.match(pattern);
-    const value = match ? Number(match[1]) : 0;
+    for (const match of normalized.matchAll(pattern)) {
+      const value = Number(match[1]);
 
-    if (Number.isFinite(value) && value > 0) {
-      return value;
+      if (Number.isFinite(value) && value > 0) {
+        matches.push({ index: match.index ?? 0, value });
+      }
     }
   }
 
-  return null;
+  if (matches.length === 0) {
+    return null;
+  }
+
+  matches.sort((left, right) => left.index - right.index);
+  return matches[matches.length - 1].value;
 }
 
 function buildLexicalSearchTerms(message: string): string[] {
@@ -829,10 +837,12 @@ function buildLexicalSearchTerms(message: string): string[] {
     "男生",
     "男子",
     "男款",
+    "男式",
     "女士",
     "女生",
     "女子",
     "女款",
+    "女式",
     "儿童",
     "童装",
   ];
@@ -1062,6 +1072,7 @@ function buildRecommendationResponse(message: string, source: ProductContext): C
       id: source.id,
       name: source.name,
       brand: source.brand || "精选品牌",
+      category: inferDisplayCategory(source),
       price_display: source.price_display,
       image: source.image,
       url: source.url,
@@ -1074,6 +1085,66 @@ function buildRecommendationResponse(message: string, source: ProductContext): C
   };
 }
 
+function inferDisplayCategory(product: ProductContext): string {
+  const text = normalizeIntentText(
+    `${product.name} ${product.description} ${product.brand} ${product.ideal_for.join(" ")} ${product.avoid_for.join(" ")}`,
+  );
+
+  if (/灯|照明|台灯|落地灯|吊灯|壁灯|氛围灯|橱柜照明|led/.test(text)) {
+    return "照明灯具";
+  }
+
+  if (/香薰|香氛|精油|扩香/.test(text)) {
+    return "家居香氛";
+  }
+
+  if (/收纳|置物|储物|柜|架|盒|箱|篮/.test(text)) {
+    return "收纳整理";
+  }
+
+  if (/椅|凳|沙发/.test(text)) {
+    return "座椅沙发";
+  }
+
+  if (/桌|茶几|书桌|餐桌/.test(text)) {
+    return "桌几";
+  }
+
+  if (/床品|床单|被套|枕|床笠|毯/.test(text)) {
+    return "床品家纺";
+  }
+
+  if (/空调|冰箱|洗衣机|烤箱|咖啡机|洗碗机|电饭煲|家电/.test(text)) {
+    return "家用电器";
+  }
+
+  if (/半袖|短袖|t恤|tee|polo|圆领|上衣/.test(text)) {
+    return "T恤/短袖";
+  }
+
+  if (/跑鞋|运动鞋|篮球鞋|足球鞋|板鞋|德训鞋|鞋|靴|凉鞋/.test(text)) {
+    return "鞋履";
+  }
+
+  if (/运动裤|短裤|长裤|裤/.test(text)) {
+    return "裤装";
+  }
+
+  if (/外套|夹克|冲锋衣|卫衣|风衣|羽绒服/.test(text)) {
+    return "外套";
+  }
+
+  if (/背包|斜挎包|单肩包|托特包|包/.test(text)) {
+    return "包袋";
+  }
+
+  if (/宠物|猫|狗/.test(text)) {
+    return "宠物用品";
+  }
+
+  return "精选商品";
+}
+
 function buildDeterministicChatReply(product: ProductContext): string {
   return `这款 ${product.name} 更贴近你刚才补充的条件，可以先作为第一候选看。`;
 }
@@ -1083,10 +1154,10 @@ function buildDeterministicWhyBuy(message: string, product: ProductContext): str
   const budget = extractCnyBudget(message);
   const scene = getSceneLabel(message);
   const kindLabel = kind ? productKindLabel(kind) : "这个品类";
-  const budgetText = budget ? `价格没有超过 ${budget} 元预算` : "价格和需求比较匹配";
-  const sceneText = scene ? `，也贴合${scene}` : "";
+  const budgetText = budget ? `价格在 ${budget} 元预算内` : "价格和需求比较匹配";
+  const sceneText = scene ? `，${scene}用起来也顺手` : "";
 
-  return `它是${kindLabel}，${budgetText}${sceneText}，比只按关键词硬推更稳。`;
+  return `它属于${kindLabel}，${budgetText}${sceneText}，可以先作为这一轮的重点候选。`;
 }
 
 function buildDeterministicNextStep(product: ProductContext): string {

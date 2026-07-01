@@ -139,9 +139,11 @@ onMounted(scrollToBottom)
 
 .message-bubble {
   display: inline-block;
-  max-width: min(34rem, 100%);
+  max-width: min(34rem, calc(100vw - 5.75rem));
   overflow: hidden;
   position: relative;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   width: fit-content;
 }
 

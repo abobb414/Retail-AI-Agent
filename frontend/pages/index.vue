@@ -10,6 +10,19 @@
           </p>
         </div>
         <div class="flex flex-wrap items-center gap-2">
+          <button
+            v-if="messages.length > 1"
+            type="button"
+            class="new-chat-button inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium text-slate-500 transition hover:-translate-y-0.5 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+            :disabled="isStreaming"
+            @click="resetChat"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" class="h-4 w-4" aria-hidden="true">
+              <path d="M3 12a9 9 0 1 0 3-6.7" />
+              <path d="M3 4v5h5" />
+            </svg>
+            <span>新会话</span>
+          </button>
           <span
             class="status-pill rounded-full border px-4 py-2 text-sm font-medium"
             :class="demoMode ? 'border-amber-200/80 bg-amber-50/80 text-amber-700' : 'border-emerald-200/80 bg-emerald-50/70 text-emerald-700'"
@@ -62,6 +75,7 @@ const {
   messages,
   profileSummary,
   quickPrompts,
+  resetChat,
   sendMessage,
 } = useChat()
 
@@ -137,6 +151,12 @@ onMounted(() => {
 
 .quick-prompt {
   backdrop-filter: blur(18px);
+}
+
+.new-chat-button {
+  background: rgba(255, 255, 255, 0.58);
+  border: 1px solid rgba(255, 255, 255, 0.68);
+  box-shadow: 0 14px 30px rgba(148, 163, 184, 0.12);
 }
 
 /* ── Entrance animation ────────────────────────────── */

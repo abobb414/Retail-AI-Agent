@@ -81,6 +81,24 @@ export function useChat() {
     },
   ])
 
+  function resetChat() {
+    draft.value = ''
+    isStreaming.value = false
+    nextId.value = 2
+    demoMode.value = true
+    conversationStage.value = 'clarify_space'
+    profileSummary.value = []
+    activeRecommendation.value = null
+    messages.value = [
+      {
+        id: 1,
+        role: 'assistant',
+        content: welcomeMessage,
+        recommendation: null,
+      },
+    ]
+  }
+
   async function sendMessage(overrideText?: string) {
     const userText = (overrideText ?? draft.value).trim()
     if (!userText || isStreaming.value) {
@@ -189,6 +207,7 @@ export function useChat() {
     messages,
     profileSummary,
     quickPrompts,
+    resetChat,
     sendMessage,
   }
 }
