@@ -1,339 +1,126 @@
-# Retail-AI-Agent
+# Retail AI Agent
 
-> 一个面向高端零售导购场景的 AI 对话式原型项目。  
-> 通过克制、优雅的交互界面，结合本地精选产品库、商品图片代理与大模型流式回复，模拟精品商场顾问式推荐体验。
+Retail AI Agent 是一个面向零售导购场景的 AI 推荐原型。项目把 Nuxt 前端、Cloudflare Workers、D1、Vectorize、Workers AI 和 DeepSeek 组合成一条完整链路：用户用自然语言表达需求，系统先从真实商品库检索并锁定候选，再生成可直接渲染的导购回复与商品卡片。
 
-![Retail-AI-Agent 首页预览](docs/images/chat-home-2026-04-09.png)
+线上演示：
 
-## 项目简介
+- Frontend: [https://retail.abobb.site](https://retail.abobb.site)
+- Worker API: [https://retail-ai-agent-worker.abobb-retail-ai-agent.workers.dev](https://retail-ai-agent-worker.abobb-retail-ai-agent.workers.dev)
 
-Retail-AI-Agent 是一个 Nuxt 全栈轻量级原型，用于演示“高端零售顾问”式的人机对话体验。
+![Retail AI Agent preview](docs/images/chat-home-2026-04-09.png)
 
-它不是一个完整电商平台，而是用尽量轻的工程成本，验证这样一种产品方向：
+## 项目定位
 
-- 用户先通过自然对话表达自己的生活方式、空间氛围与品质偏好
-- 系统先通过本地精选产品库锁定候选商品，避免模型自由编造 SKU
-- AI 以顾问式语气逐步了解需求，并最终推荐最合适的一款产品
+这个项目不是传统电商搜索框，也不是只会闲聊的客服机器人。它验证的是一个更接近线下导购的体验：
 
-这个项目重点关注三件事：
+- 信息不足时先追问关键条件，而不是立即硬推商品。
+- 用户给出品类、预算、性别、场景后，从真实商品库中召回候选。
+- 最终卡片中的商品名称、价格、图片和官网链接必须来自 D1 真实数据。
+- LLM 只负责把推荐理由写得更自然，不允许改商品事实字段。
 
-- 视觉表达要克制，不做普通客服窗口
-- 推荐过程要像顾问，而不是像搜索框
-- 工程结构要轻，方便继续迭代为更完整的零售体验系统
+更完整的产品需求见 [docs/PRD.md](docs/PRD.md)。
 
-## 设计目标
+## 当前能力
 
-### 1. 让对话节奏更像线下顾问接待
+- 支持中文自然语言导购，例如“男士通勤半袖 100 元以内”“小卧室想更舒服，灯光 300 元”。
+- 支持多轮会话中的预算、人群和品类约束，不会把上一轮需求错误带入下一轮独立选品。
+- 使用 D1 存储商品结构化字段，使用 Vectorize 存储商品向量。
+- 使用 Workers AI `@cf/baai/bge-m3` 生成查询和商品 Embedding。
+- 使用 Worker 端规则过滤保证品类、预算、人群不跑偏。
+- 使用 DeepSeek 只润色卡片文案，真实商品字段由 Worker/D1 锁定。
+- 前端通过 SSE 渲染对话文本、商品卡片、推荐状态和重置会话。
 
-这个项目不想把首页做成常见的客服问答框，而是希望更接近线下零售顾问了解需求的过程：
-
-- 第一轮先理解空间
-- 第二轮再收拢氛围或功能
-- 第三轮才推荐单品
-- 推荐时交代判断依据，而不是堆砌产品参数
-
-### 2. 先用轻量方案把体验闭环跑通
-
-在原型阶段，重点是先把对话链路、推荐逻辑和界面反馈跑顺，而不是过早引入更重的基础设施。因此这里采用：
-
-- 本地 JSON 作为精选产品库
-- Nuxt 3 负责展示、交互与同源 API
-- 流式对话作为核心体验形式
-- 图片代理作为稳定展示补充，减少品牌 CDN 跨域或热链失败
-
-### 3. 文档不只负责告诉你怎么跑
-
-除了运行方式，这份文档也会把项目的设计取向、系统链路、当前边界和后续扩展空间交代清楚。
-
-## 当前体验
-
-当前首页是一个偏作品展示属性的聊天界面，视觉上采用：
-
-- 极淡薄荷绿到白色的背景渐变
-- 居中毛玻璃聊天容器
-- 品牌化的 `Retail AI Agent` 字标
-- 对话消息的淡入与轻微上移动效
-- 更接近高端零售接待界面的安静氛围，而非传统客服窗口
-
-推荐结果已经不再只是文本，而是会落成更完整的展示信息：
-
-- 顾问判断摘要
-- 产品大图
-- 品牌 / 类别 / 价格区间
-- 材质与工艺说明
-- 专业参数
-- 命中的偏好点
-- 为什么推荐这款
-- 为什么暂不推荐别的
-- 官网入口
-
-## 核心亮点
-
-- 基于 Nuxt 3 + Tailwind CSS，展示层、同源 API 与部署路径更集中
-- 商品数据来自本地 JSON 精选库，推荐结果可控、可审查、可演示
-- `/api/chat` 使用 SSE 流式响应，前端可实时显示顾问回复过程
-- API 会返回结构化推荐数据，而不是只返回自然语言段落
-- `/api/image` 负责代理外部商品图，减少浏览器直连品牌 CDN 的失败率
-- 对泛品类输入先追问，避免“用户只说椅子就立刻乱推”的推荐漂移
-
-## PRD：灵感买手式零售导购 Agent
-
-### 1. 产品背景
-
-传统电商搜索往往要求用户先知道自己要买什么，但真实的家居消费经常不是从商品名开始，而是从一种模糊的生活状态开始：
-
-- “我的桌面一团糟”
-- “换了新工作，想重新整理办公桌”
-- “今晚加班好累，想让卧室舒服一点”
-- “想要一个椅子，但不知道该放在哪种场景里”
-
-Retail-AI-Agent 的目标不是做一个参数搜索框，而是验证一种更接近线下买手顾问的导购方式：先理解用户的状态，再把状态转译成空间问题，最后锁定一个具体可买、可解释、可展示的商品。
-
-### 2. 产品定位
-
-Retail-AI-Agent 是一个面向家居、生活方式与精品零售场景的 AI 买手原型。它承担三个角色：
-
-- 空间顾问：把用户的情绪、场景和生活节奏翻译成空间需求
-- 商品策展人：从精选商品库中锁定单个最合适商品，而不是一次性抛出列表
-- 展示型销售助理：用自然语言和结构化卡片同时完成推荐、解释和信任建立
-
-### 3. 目标用户
-
-| 用户类型 | 典型问题 | 产品价值 |
-| --- | --- | --- |
-| 家居消费用户 | 不知道具体买什么，只知道想改善某个角落 | 降低决策压力，把模糊需求转成明确单品 |
-| 精品零售品牌 | 希望线上导购更像真实顾问，而不是客服机器人 | 提升品牌调性与推荐可信度 |
-| 商场 / 买手店 | 希望用轻量方式验证 AI 导购体验 | 快速构建可演示、可迭代的交互样板 |
-| 产品 / 投资评审者 | 需要看到清晰的 AI 零售闭环 | 展示对话、推荐、卡片、商品库、部署链路的完整闭环 |
-
-### 4. 核心用户故事
-
-1. 作为一个用户，我希望不必输入准确商品名，也能通过一句生活化描述获得合适推荐。
-2. 作为一个用户，我希望 AI 不要一上来就乱推，而是在信息不足时先问一个关键问题。
-3. 作为一个用户，我希望推荐结果不是泛泛而谈，而是有图片、品牌、价格带、材质、适用场景和不适合人群。
-4. 作为一个品牌方，我希望 AI 只推荐被允许的精选商品，不要胡乱编造 SKU。
-5. 作为一个演示项目维护者，我希望本地 JSON 就能完成稳定演示，同时保留未来接数据库和官方商品页的空间。
-
-### 5. 端到端流程
-
-```mermaid
-flowchart TD
-    A["用户打开页面"] --> B["前端展示欢迎语和快捷标签"]
-    B --> C["用户点击标签或输入一句自然语言"]
-    C --> D["前端附带隐藏导购指令发送到 Nuxt API"]
-    D --> E["API 在 products.json 中做关键词与场景匹配"]
-    E --> F{"能否锁定唯一商品"}
-    F -- "不能" --> G["只追问一个关键问题"]
-    F -- "能" --> H["将锁定商品和用户输入交给大模型"]
-    H --> I["生成顾问式推荐话术"]
-    I --> J["SSE 流式返回文本"]
-    I --> K["返回结构化商品卡片数据"]
-    J --> L["前端展示对话"]
-    K --> M["前端展示推荐卡片和产品图片"]
-```
-
-### 6. 推荐策略
-
-系统当前采用“先锁商品，再写话术”的策略，避免模型自由发挥导致商品漂移。
-
-| 阶段 | 策略 | 目的 |
-| --- | --- | --- |
-| 输入理解 | 从用户文本中提取空间、情绪、功能、风格、预算线索 | 判断是否进入推荐阶段 |
-| 泛问拦截 | 对“我想要一个椅子”这类纯品类请求先追问 | 防止过早推荐错误商品 |
-| 商品锁定 | 在本地 `products.json` 中按关键词、场景、品牌、材质做模糊匹配 | 保证推荐来自可控商品库 |
-| 话术生成 | 将锁定商品和用户输入一次性交给模型 | 生成像顾问聊过一阵子的自然表达 |
-| 卡片返回 | Nuxt API 返回结构化 `product` 事件 | 前端稳定展示图片、价格、材质与推荐理由 |
-
-### 7. 数据契约
-
-每个商品至少需要包含以下字段，以保证推荐卡片完整：
-
-```json
-{
-  "id": "balmuda-lantern",
-  "name": "BALMUDA The Lantern 便携氛围灯",
-  "brand": "BALMUDA",
-  "category": "氛围照明",
-  "price_range": "USD 149",
-  "budget_tier": "中高预算",
-  "materials": "金属灯架、磨砂灯罩、可充电电池、LED 光源",
-  "craftsmanship": "做工与设计判断",
-  "style_tags": ["复古", "温暖", "生活方式"],
-  "room_tags": ["卧室", "餐桌", "阳台"],
-  "source_url": "https://us.balmuda.com/products/balmuda-the-lantern",
-  "image": "https://cdn.shopify.com/...",
-  "keywords": ["台灯", "氛围灯", "暖光", "今晚加班好累"]
-}
-```
-
-### 8. 功能需求
-
-| 编号 | 功能 | 优先级 | 验收标准 |
-| --- | --- | --- | --- |
-| FR-01 | 首屏欢迎语与快捷标签 | P0 | 用户首次打开页面即可看到欢迎语和三个引导按钮 |
-| FR-02 | 自然语言输入 | P0 | 用户可输入任意中文描述并触发流式回复 |
-| FR-03 | 泛品类追问 | P0 | “我想要一个椅子”不直接出卡片，而是询问使用场景 |
-| FR-04 | 本地商品锁定 | P0 | 命中关键词后只推荐 `products.json` 中的确定商品 |
-| FR-05 | 顾问式话术生成 | P0 | 回复必须接住用户状态，并自然过渡到推荐商品 |
-| FR-06 | 推荐卡片展示 | P0 | 卡片展示图片、名称、品牌、价格、材质、适用场景和推荐理由 |
-| FR-07 | 图片兜底 | P1 | 外链不稳定时可使用本地静态图片，不出现 404 或错误商品图 |
-| FR-08 | 生产部署 | P1 | Vercel 生产地址可访问，并可 alias 到指定长域名 |
-
-### 9. 非功能需求
-
-- 响应体验：模型回复采用 SSE 流式输出，首段文本应尽快出现
-- 推荐稳定性：商品名称、图片和卡片数据必须来自 API 锁定结果，不允许模型自行替换
-- 展示可信度：产品图不得与商品类别明显不符，必要时使用品牌或本地兜底图
-- 可维护性：商品数据先放在 JSON 中，便于快速编辑、审查和演示
-- 可迁移性：推荐逻辑应允许未来迁移到数据库、向量检索或正式商品管理后台
-- 品牌感：界面表达保持克制、干净、轻奢，不走普通客服窗口风格
-
-### 10. 成功指标
-
-| 指标 | 目标 |
-| --- | --- |
-| 泛问误推荐率 | 泛品类输入不直接推荐错误商品 |
-| 商品图准确率 | 推荐卡片图片不出现 404、不串品类 |
-| 推荐闭环完成度 | 用户从一句自然语言到看到商品卡片不超过一次关键追问 |
-| 演示稳定性 | 无 Key 或线上模型波动时仍可保留基本展示能力 |
-| 可扩展性 | 新增商品只需维护 JSON 字段，不需要重写 UI |
-
-## 系统架构
+## 架构概览
 
 ```mermaid
 flowchart LR
-    U["用户"] --> F["Nuxt 3 前端"]
-    F --> C["聊天界面 / 推荐卡片"]
-    F --> A["Nuxt server API"]
-    A --> P["products.json 精选产品库"]
-    A --> I["图片代理 /api/image"]
-    A --> M["商品锁定与顾问式 Prompt"]
-    M --> O["DeepSeek Chat Completions"]
-    O --> A
-    A --> F
+    U["User"] --> V["Nuxt Frontend on Vercel"]
+    V --> N["Nuxt /api/chat Proxy"]
+    N --> W["Cloudflare Worker /api/chat"]
+    W --> AI["Workers AI Embedding"]
+    W --> VX["Vectorize Index"]
+    W --> D1["D1 products table"]
+    W --> N
+    N --> DS["DeepSeek Chat"]
+    DS --> N
+    N --> V
 ```
 
-## 推荐流程
+核心原则是“先锁商品，再写文案”：
 
-```mermaid
-flowchart TD
-    A["用户输入偏好"] --> B["API 提取空间 / 氛围 / 功能线索"]
-    B --> C["顾问判断当前阶段"]
-    C --> D["信息不足，继续追问"]
-    C --> E["信息足够，形成单品推荐"]
-    E --> F["本地精选产品库匹配"]
-    F --> H["锁定唯一候选产品"]
-    H --> I["生成推荐理由与替代说明"]
-    I --> J["流式返回文本 + 产品卡片数据"]
-```
-
-## 为什么当前阶段使用 JSON，而不是数据库
-
-这是一个刻意做出的原型阶段取舍，而不是简化偷懒。
-
-原因主要有四个：
-
-1. 当前产品量依然可控  
-   这里只有少量精选单品，用 JSON 足够承载核心体验。
-
-2. 重点在体验闭环，而不是数据治理  
-   现阶段更重要的是“顾问体验是否成立”，而不是后台管理复杂度。
-
-3. 降低部署与演示门槛  
-   不依赖数据库意味着你可以更快地跑起来、更轻地分享、更方便地展示。
-
-4. 仍保留升级路径  
-   现在的结构并不阻碍未来迁移到 SQLite、PostgreSQL 或更复杂的推荐服务。
+1. Nuxt 接收前端消息，并判断最新消息是否应作为独立选品请求。
+2. Worker 将用户问题向量化，并结合 D1 关键词召回与 Vectorize 语义召回。
+3. Worker 对候选商品做预算、人群、品类过滤和排序。
+4. Worker 返回锁定后的真实商品字段。
+5. Nuxt 调用 DeepSeek 生成更自然的导购文案，但只合并可润色字段。
+6. 前端展示 SSE 文本和结构化商品卡片。
 
 ## 技术栈
 
-### 前端
-
-- Nuxt 3
-- Vue 3
-- Tailwind CSS
-
-### API 与推荐层
-
-- Nuxt server routes
-- DeepSeek Chat Completions
-- 同源图片代理
-
-### 数据与推荐层
-
-- 本地 JSON 精选产品库
-- 顾问式 Prompt 与结构化推荐事件
-- 本地静态兜底图
+| 层级 | 技术 |
+| --- | --- |
+| 前端 | Nuxt 3, Vue 3, Tailwind CSS |
+| 前端部署 | Vercel |
+| API 代理 | Nuxt server route |
+| RAG 中枢 | Cloudflare Worker |
+| 商品数据库 | Cloudflare D1 |
+| 向量检索 | Cloudflare Vectorize |
+| Embedding | Workers AI `@cf/baai/bge-m3` |
+| 文案润色 | DeepSeek Chat Completions |
+| 导入脚本 | Node.js + curl |
 
 ## 项目结构
 
 ```text
-Retail-AI-Agent/
-|-- docs/
-|   `-- images/
-|       `-- chat-home-2026-04-09.png
+.
+|-- index.ts                         # Cloudflare Worker: 导入、清洗、RAG 检索、商品锁定
+|-- wrangler.jsonc                   # Worker、D1、Vectorize、Workers AI 绑定
+|-- migrations/
+|   `-- 001_expand_products_for_rag.sql
+|-- scripts/
+|   |-- import-real-products.mjs      # 批量导入商品到 D1 + Vectorize
+|   |-- migrate-products-schema.mjs   # D1 表结构升级脚本
+|   `-- README.md
 |-- frontend/
-|   |-- assets/
-|   |   `-- css/
-|   |       `-- main.css
-|   |-- components/
-|   |   |-- InputBar.vue
-|   |   |-- MessageList.vue
-|   |   |-- RecommendationCard.vue
-|   |   `-- StatusPanel.vue
-|   |-- composables/
-|   |   `-- useChat.ts
-|   |-- pages/
-|   |   `-- index.vue
-|   |-- public/
-|   |   |-- favicon.png
-|   |   |-- preview.png
-|   |   `-- yeswood-fallback.png
-|   |-- server/
-|   |   |-- api/
-|   |   |   |-- chat.post.ts
-|   |   |   `-- image.get.ts
-|   |   |-- data/
-|   |   |   `-- products.json
-|   |   `-- utils/
-|   |       `-- productCatalog.ts
-|   |-- types/
-|   |   `-- recommendation.ts
-|   |-- app.vue
+|   |-- pages/index.vue               # 主聊天界面
+|   |-- composables/useChat.ts        # SSE 聊天状态管理
+|   |-- components/                   # 消息、输入栏、推荐卡片、状态栏
+|   |-- server/api/chat.post.ts       # Nuxt 代理 + DeepSeek 文案润色
+|   |-- server/api/image.get.ts       # 商品图代理
+|   |-- server/data/realProducts.json # 商品数据源
 |   |-- nuxt.config.ts
-|   |-- package.json
-|   |-- tailwind.config.ts
 |   `-- vercel.json
+|-- docs/
+|   |-- PRD.md
+|   `-- images/
 |-- CHANGELOG.md
-|-- .gitignore
 |-- LICENSE
 `-- README.md
 ```
 
-## 当前能力边界
+## 环境变量
 
-这个仓库目前定位为“可演示、可继续开发”的交互原型，而不是生产环境的完整零售系统。
+### Nuxt / Vercel
 
-已具备：
+```env
+WORKER_CHAT_URL=https://retail-ai-agent-worker.abobb-retail-ai-agent.workers.dev/api/chat
+WORKER_RESOLVE_IP=104.21.35.251
+DEEPSEEK_API_KEY=your_deepseek_api_key
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_MODEL=deepseek-chat
+```
 
-- 首页视觉与聊天交互原型
-- 顾问式追问节奏
-- 本地商品数据管理
-- 本地产品锁定与图片代理
-- 结构化推荐卡片展示
-- 流式对话接口结构
+### Cloudflare Worker Bindings
 
-暂未完成：
+这些绑定在 [wrangler.jsonc](wrangler.jsonc) 中配置：
 
-- 完整的推荐解释链路追踪与日志化
-- 用户身份体系
-- 后台商品管理系统
-- 生产级鉴权与速率限制
-- 图片资源托管与正式品牌素材管理
+- `env.DB`: D1 database `retail-ai-agent-db`
+- `env.VECTOR_INDEX`: Vectorize index `retail-ai-agent-products-bge-m3`
+- `env.AI`: Workers AI binding
 
-## 本地运行
+## 本地开发
 
-### 启动前端
+安装并启动前端：
 
 ```bash
 cd frontend
@@ -341,57 +128,149 @@ npm install
 npm run dev
 ```
 
-启动后访问：
+前端默认访问：
 
 - [http://127.0.0.1:3000](http://127.0.0.1:3000)
 
-## Vercel 部署
+生产构建检查：
 
-这个项目部署为一个 Vercel Project，Root Directory 选择 `frontend`。
-
-需要在 Vercel 环境变量里配置：
-
-```env
-DEEPSEEK_API_KEY=your_deepseek_api_key
-DEEPSEEK_BASE_URL=https://api.deepseek.com
-DEEPSEEK_MODEL=deepseek-chat
+```bash
+cd frontend
+npm run build
 ```
 
-## 环境变量
+Worker dry run：
 
-本地开发使用根目录 `.env` 或 `frontend/.env` 管理模型配置：
-
-```env
-DEEPSEEK_API_KEY=your_deepseek_api_key
-DEEPSEEK_BASE_URL=https://api.deepseek.com
-DEEPSEEK_MODEL=deepseek-chat
+```bash
+npx wrangler deploy --dry-run
 ```
 
-说明：
+## 数据导入与迁移
 
-- 当前 API 直接调用 DeepSeek Chat Completions
-- 如果暂时没有 `DEEPSEEK_API_KEY`，页面可以打开，但 `/api/chat` 会返回配置错误
-- 商品匹配与卡片数据仍由本地 JSON 控制，模型只负责生成导购话术
+升级 D1 商品表：
 
-## API 概览
+```bash
+D1_DATABASE_NAME=retail-ai-agent-db node scripts/migrate-products-schema.mjs
+```
 
-- `POST /api/chat`：流式对话接口，用于顾问式推荐回复与结构化商品事件
-- `GET /api/image?url=...`：同源图片代理，用于稳定加载外部商品图
+小批量烟测导入：
 
-## 后续可继续增强
+```bash
+WORKER_URL=https://retail-ai-agent-worker.abobb-retail-ai-agent.workers.dev \
+LIMIT=5 \
+BATCH_SIZE=8 \
+CONCURRENCY=1 \
+node scripts/import-real-products.mjs
+```
 
-建议下一阶段可以考虑：
+断点续跑：
 
-- 引入更稳定的偏好记忆层
-- 让推荐结果支持多维对比与搭配建议
-- 增加更完整的品牌视觉系统
-- 补充动图演示与更多截图
-- 引入正式日志、速率限制和数据后台
+```bash
+WORKER_URL=https://retail-ai-agent-worker.abobb-retail-ai-agent.workers.dev \
+START_INDEX=500 \
+BATCH_SIZE=8 \
+CONCURRENCY=1 \
+node scripts/import-real-products.mjs
+```
 
-## 更新日志
+## API 契约
 
-项目更新记录见 [CHANGELOG.md](CHANGELOG.md)。
+### Frontend Proxy
+
+`POST /api/chat`
+
+请求：
+
+```json
+{
+  "messages": [
+    { "role": "user", "content": "男士通勤半袖100元以内" }
+  ]
+}
+```
+
+响应为 SSE：
+
+- `chunk`: 导购回复文本
+- `product`: 前端推荐卡片数据
+- `meta`: 当前链路状态
+- `done`: 流结束
+- `error`: 错误信息
+
+### Worker Chat
+
+`POST /api/chat`
+
+请求：
+
+```json
+{
+  "message": "男士通勤半袖100元以内"
+}
+```
+
+响应：
+
+```json
+{
+  "chat_reply": "这款男式短袖更贴近你的条件，可以先看。",
+  "recommended_product": {
+    "id": "muji-4548076062684",
+    "name": "男式 天竺编织 圆领短袖T恤",
+    "brand": "MUJI",
+    "category": "T恤/短袖",
+    "price_display": "CNY 78",
+    "image": "https://...",
+    "url": "https://...",
+    "why_buy": "它属于短袖上衣，价格在 100 元预算内。",
+    "ideal_for": [],
+    "avoid_for": [],
+    "next_step_tip": "下一步先看官网尺码、库存和实拍细节。"
+  },
+  "stage": "rag_recommendation"
+}
+```
+
+## 部署
+
+### Cloudflare Worker
+
+```bash
+npx wrangler deploy
+```
+
+### Vercel Frontend
+
+Vercel Project 的 Root Directory 设置为 `frontend`。
+
+```bash
+cd frontend
+vercel deploy --prod --yes
+```
+
+## 质量边界
+
+已处理：
+
+- 商品事实字段锁定，避免模型幻觉 SKU。
+- 多轮预算串联修复。
+- 显式品类、人群和预算硬过滤。
+- 新会话重置。
+- DeepSeek 文案润色失败时自动回退 Worker 文案。
+
+仍可增强：
+
+- 将 `category` 作为 D1 正式字段，而不是运行时推导。
+- 增加请求日志、召回命中解释和可观测面板。
+- 为商品导入增加更细的失败批次恢复报告。
+- 引入速率限制、鉴权和更完整的生产安全策略。
+
+## 文档
+
+- [PRD](docs/PRD.md)
+- [更新日志](CHANGELOG.md)
+- [导入脚本说明](scripts/README.md)
 
 ## License
 
-本项目采用 [MIT License](LICENSE)。
+[MIT License](LICENSE)

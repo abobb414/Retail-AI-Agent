@@ -2,6 +2,18 @@
 
 本文档记录 `Retail-AI-Agent` 的重要迭代。
 
+## [2026-07-01] — README 专业化 + PRD 独立成文
+
+### 新增
+
+- 新增 [docs/PRD.md](docs/PRD.md)：把产品背景、定位、目标用户、核心流程、功能需求、数据约束、推荐策略、非功能需求和成功指标从 README 中拆出，形成独立 PRD。
+
+### 优化
+
+- 重写 README：从“开发记录式说明”调整为项目入口文档，突出线上演示、当前能力、Cloudflare RAG 架构、技术栈、环境变量、数据导入、API 契约和部署方式。
+- 同步更新架构叙事：README 不再停留在旧的本地 JSON 原型阶段，而是准确描述当前的 Nuxt + Vercel + Cloudflare Worker + D1 + Vectorize + Workers AI + DeepSeek 链路。
+- 明确“先锁商品，再写文案”的系统原则，强调 DeepSeek 只润色导购文案，商品事实字段由 Worker/D1 锁定。
+
 ## [2026-07-01] — 顾问式多轮会话修复 + DeepSeek 卡片文案增强
 
 ### 新增
