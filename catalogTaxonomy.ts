@@ -49,7 +49,7 @@ const PRODUCT_TYPE_ALIASES: Array<{ type: string; department: Department; aliase
   { type: "tablet", department: "digital", aliases: ["平板", "平板电脑", "ipad", "tablet"] },
   { type: "computer", department: "digital", aliases: ["笔记本", "电脑", "macbook", "laptop"] },
   { type: "monitor", department: "digital", aliases: ["显示器", "monitor"] },
-  { type: "audio", department: "digital", aliases: ["耳机", "耳塞", "音箱", "音响", "buds", "headphone"] },
+  { type: "audio", department: "digital", aliases: ["耳机", "耳塞", "音箱", "音响", "buds", "headphone", "speaker"] },
   { type: "television", department: "digital", aliases: ["电视", "智能电视", "smart tv", "qled", "oled"] },
   { type: "storage_device", department: "digital", aliases: ["存储卡", "内存卡", "固态硬盘", "ssd", "硬盘"] },
   { type: "network_device", department: "digital", aliases: ["路由器", "路由", "mesh"] },
@@ -72,22 +72,23 @@ const PRODUCT_TYPE_ALIASES: Array<{ type: string; department: Department; aliase
   { type: "dress", department: "apparel", aliases: ["裙子", "连衣裙", "半身裙"] },
   { type: "underwear", department: "apparel", aliases: ["内衣", "内裤", "文胸", "睡衣"] },
   { type: "apparel_accessory", department: "apparel", aliases: ["配件", "围巾", "口罩", "太阳镜", "眼镜", "帽子", "包袋"] },
+  { type: "activewear", department: "apparel", aliases: ["瑜伽服", "瑜伽裤", "瑜伽上衣"] },
   { type: "sofa", department: "furniture", aliases: ["沙发", "sofa"] },
   { type: "bed", department: "furniture", aliases: ["床", "床架", "床垫"] },
   { type: "chair", department: "furniture", aliases: ["椅子", "座椅", "办公椅", "凳子"] },
   { type: "table", department: "furniture", aliases: ["桌子", "书桌", "办公桌", "餐桌", "茶几"] },
   { type: "storage", department: "furniture", aliases: ["收纳", "柜子", "衣柜", "置物架", "储物"] },
-  { type: "tableware", department: "home_goods", aliases: ["餐具", "厨具", "碗", "盘", "杯子", "筷子", "锅具"] },
-  { type: "home_textile", department: "home_goods", aliases: ["床品", "床单", "被套", "枕套", "靠垫", "毛巾"] },
+  { type: "tableware", department: "home_goods", aliases: ["餐具", "厨具", "咖啡壶", "茶壶", "手冲壶", "碗", "盘", "杯子", "筷子", "锅具"] },
+  { type: "home_textile", department: "home_goods", aliases: ["床品", "床单", "被套", "四件套", "枕套", "靠垫", "毛巾"] },
   { type: "home_organization", department: "home_goods", aliases: ["衣架", "晾衣架", "家居收纳", "木器护理"] },
   { type: "home_decor", department: "home_goods", aliases: ["香薰", "蜡烛", "花瓶", "装饰", "地毯", "镜子"] },
   { type: "skincare", department: "personal_care", aliases: ["护肤", "面膜", "洁面", "洗发水", "沐浴露", "润唇膏"] },
   { type: "hand_care", department: "personal_care", aliases: ["护手霜", "护手"] },
-  { type: "snack", department: "food", aliases: ["零食", "食品", "茶", "咖啡", "饮料", "饼干", "薯片"] },
+  { type: "food", department: "food", aliases: ["零食", "食品", "茶", "咖啡", "饮料", "饼干", "薯片"] },
   { type: "pet_food", department: "pet", aliases: ["宠物食品", "宠物零食", "猫粮", "狗粮"] },
-  { type: "baby_product", department: "baby", aliases: ["婴儿", "婴童", "宝宝", "母婴", "儿童用品"] },
+  { type: "baby_product", department: "baby", aliases: ["婴儿", "婴童", "宝宝", "母婴", "儿童用品", "睡袋"] },
   { type: "stationery", department: "stationery", aliases: ["文具", "笔", "文件夹", "笔袋", "卡包"] },
-  { type: "lamp", department: "lighting", aliases: ["灯", "台灯", "落地灯", "吊灯", "灯具", "照明", "lamp"] },
+  { type: "lamp", department: "lighting", aliases: ["床头灯", "照明灯具", "室内照明", "台灯", "落地灯", "吊灯", "灯具", "照明", "灯", "lamp"] },
   { type: "toy", department: "toys", aliases: ["玩具", "积木", "火车轨道", "儿童玩具", "toy"] },
   { type: "exercise_equipment", department: "fitness", aliases: ["健身器材", "动感单车", "跑步机", "运动器材", "exercise bike"] },
 ];
@@ -103,6 +104,17 @@ const SPECIFIC_INTENT_ALIASES = [
   { intent: "sandal", label: "凉鞋", productType: "shoes", aliases: ["凉鞋", "沙滩鞋", "溯溪鞋", "sandal"] },
   { intent: "boots", label: "靴子", productType: "shoes", aliases: ["靴子", "雪地靴", "短靴", "长靴", "boots"] },
   { intent: "formal_shoe", label: "正装鞋", productType: "shoes", aliases: ["皮鞋", "正装鞋", "乐福鞋", "loafer"] },
+  { intent: "earphones", label: "耳机", productType: "audio", aliases: ["耳机", "耳塞", "buds", "headphone", "earphone"] },
+  { intent: "speakers", label: "音箱", productType: "audio", aliases: ["音箱", "音响", "speaker", "soundbar"] },
+  { intent: "coffee_pot", label: "咖啡壶", productType: "tableware", aliases: ["咖啡壶", "手冲壶", "滤壶"] },
+  { intent: "coffee_machine", label: "咖啡机", productType: "kitchen_appliance", aliases: ["咖啡机", "coffee machine"] },
+  { intent: "bed_frame", label: "床架", productType: "bed", aliases: ["床架", "bed frame"] },
+  { intent: "mattress", label: "床垫", productType: "bed", aliases: ["床垫", "mattress"] },
+  { intent: "storage_cabinet", label: "收纳柜", productType: "storage", aliases: ["收纳柜", "储物柜", "鞋柜", "衣柜", "cabinet"] },
+  { intent: "office_chair", label: "办公椅", productType: "chair", aliases: ["办公椅", "电脑椅", "office chair"] },
+  { intent: "coffee", label: "咖啡", productType: "food", aliases: ["咖啡", "咖啡豆", "coffee"] },
+  { intent: "baby_sleeping_bag", label: "婴儿睡袋", productType: "baby_product", aliases: ["睡袋", "婴儿睡袋", "sleep sack"] },
+  { intent: "floor_lamp", label: "落地灯", productType: "lamp", aliases: ["落地灯", "floor lamp"] },
 ];
 
 type BrandAlias = {
@@ -148,23 +160,31 @@ const DEPARTMENT_ALIASES: Array<{ department: Department; aliases: string[] }> =
   { department: "stationery", aliases: ["文具办公", "办公用品", "文具", "办公"] },
   { department: "lighting", aliases: ["照明灯具", "照明", "灯具", "灯光"] },
   { department: "toys", aliases: ["玩具", "儿童玩具", "益智玩具"] },
-  { department: "fitness", aliases: ["运动健身", "健身器材", "运动器材", "健身设备"] },
+  { department: "fitness", aliases: ["运动健身", "健身器材", "运动器材", "健身设备", "有氧运动", "有氧", "健身"] },
 ];
 
 export function detectRequestProfile(message: string): RequestProfile {
   const text = normalizeText(message);
   const typeMatch = PRODUCT_TYPE_ALIASES
-    .flatMap((entry) => entry.aliases.map((alias) => ({ entry, alias: normalizeText(alias) })))
+    .flatMap((entry) => entry.aliases.map((alias) => ({
+      entry,
+      alias: normalizeText(alias),
+      index: text.indexOf(normalizeText(alias)),
+    })))
     .filter(({ alias }) => alias && text.includes(alias))
-    .sort((left, right) => right.alias.length - left.alias.length)[0]?.entry;
+    .sort((left, right) => right.alias.length - left.alias.length || left.index - right.index)[0]?.entry;
   const brandMatch = BRAND_ALIASES.find((entry) => entry.aliases.some((alias) => text.includes(normalizeText(alias))));
   const department = typeMatch?.department ?? detectDepartment(text);
+  const productType = typeMatch?.type
+    ?? (department === "fitness" && /有氧|动感单车|跑步机|健身器材|运动器材|健身设备/.test(text)
+      ? "exercise_equipment"
+      : null);
   const budget = extractBudget(message);
 
   return {
     department,
-    productType: typeMatch?.type ?? null,
-    specificIntent: detectSpecificIntent(text, typeMatch?.type ?? null),
+    productType,
+    specificIntent: detectSpecificIntent(text, productType),
     brand: brandMatch?.brand ?? null,
     gender: detectGender(text),
     budget,
@@ -176,6 +196,7 @@ export function detectRequestProfile(message: string): RequestProfile {
 
 export function getProductTypeLabel(productType: string | null) {
   if (!productType) return "这个品类";
+  if (productType === "food") return "食品饮料";
   const match = PRODUCT_TYPE_ALIASES.find((entry) => entry.type === productType);
   return match?.aliases[0] ?? productType;
 }
@@ -253,7 +274,7 @@ export function extractBudget(message: string) {
   const contextualMatches = [
     ...normalized.matchAll(
       new RegExp(
-        `(?:预算|价格|价位|不超过|不高于|最多|控制在|花费|花销|准备花)\\s*[:：]?\\s*(?:(?:是|为|在|大约|大概|约|最多|不超过)\\s*)*${amountPattern}` +
+        `(?:预算|价格|价位|不超过|不高于|最多|控制在|花费|花销|准备花|别超过|不超)\\s*[:：]?\\s*(?:(?:是|为|在|大约|大概|约|最多|不超过)\\s*)*${amountPattern}` +
           `\\s*(?:元|块|人民币|rmb|cny)?`,
         "gi",
       ),
@@ -262,15 +283,80 @@ export function extractBudget(message: string) {
   const suffixedMatches = [
     ...normalized.matchAll(new RegExp(`${amountPattern}\\s*(?:元|块|人民币|rmb|cny|以内|以下|左右|上下)`, "gi")),
   ];
-  const explicit = [...contextualMatches, ...suffixedMatches]
-    .map((match) => Number(match[1]))
-    .filter((value) => Number.isFinite(value));
+  const conversationalMatches = [
+    ...normalized.matchAll(new RegExp(`(?:如果|要是|提高到|加到|改到)\\s*${amountPattern}\\s*(?:元|块|人民币|rmb|cny)?\\s*(?:能买|也可以|可以|够|行|左右|上下)?`, "gi")),
+  ];
+  const explicit = [
+    ...contextualMatches.map((match) => ({ value: Number(match[1]), index: match.index ?? 0 })),
+    ...suffixedMatches.map((match) => ({ value: Number(match[1]), index: match.index ?? 0 })),
+    ...conversationalMatches.map((match) => ({ value: Number(match[1]), index: match.index ?? 0 })),
+    ...extractChineseBudgetMatches(normalized),
+  ]
+    .filter(({ value }) => Number.isFinite(value))
+    .sort((left, right) => left.index - right.index);
 
-  if (explicit.length) return explicit.at(-1) ?? null;
+  if (explicit.length) return explicit.at(-1)?.value ?? null;
 
   const segments = normalized.split(/[；;。!?！？]/).map((segment) => segment.trim()).filter(Boolean);
   const last = segments.at(-1) ?? "";
   return /^\d{2,6}(?:\.\d+)?$/.test(last) ? Number(last) : null;
+}
+
+function extractChineseBudgetMatches(text: string) {
+  const amountPattern = "([零〇一二两三四五六七八九十百千万]+)";
+  const contextual = [
+    ...text.matchAll(new RegExp(
+      `(?:预算|价格|价位|不超过|不高于|最多|控制在|花费|花销|准备花|别超过|不超)\\s*[:：]?\\s*${amountPattern}\\s*(?:元|块|人民币|rmb|cny|以内|以下|左右|上下)?`,
+      "gi",
+    )),
+  ];
+  const suffixed = [
+    ...text.matchAll(new RegExp(`${amountPattern}\\s*(?:元|块|人民币|rmb|cny|以内|以下|左右|上下)`, "gi")),
+  ];
+
+  return [...contextual, ...suffixed]
+    .map((match) => ({ value: parseChineseAmount(match[1]), index: match.index ?? 0 }))
+    .filter(({ value }) => value !== null);
+}
+
+function parseChineseAmount(value: string) {
+  const digits: Record<string, number> = {
+    零: 0, 〇: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5,
+    六: 6, 七: 7, 八: 8, 九: 9,
+  };
+  const units: Record<string, number> = { 十: 10, 百: 100, 千: 1000, 万: 10000 };
+
+  if (!value || [...value].some((char) => digits[char] === undefined && units[char] === undefined)) return null;
+
+  const trailingHundred = value.match(/^([零〇一二两三四五六七八九])千([零〇一二两三四五六七八九])$/);
+  if (trailingHundred) return digits[trailingHundred[1]] * 1000 + digits[trailingHundred[2]] * 100;
+
+  const trailingTen = value.match(/^([零〇一二两三四五六七八九])百([零〇一二两三四五六七八九])$/);
+  if (trailingTen) return digits[trailingTen[1]] * 100 + digits[trailingTen[2]] * 10;
+
+  let total = 0;
+  let section = 0;
+  let number = 0;
+
+  for (const char of value) {
+    if (digits[char] !== undefined) {
+      number = digits[char];
+      continue;
+    }
+
+    const unit = units[char];
+    if (unit === 10000) {
+      section = (section + number) * unit;
+      total += section;
+      section = 0;
+      number = 0;
+    } else {
+      section += (number || 1) * unit;
+      number = 0;
+    }
+  }
+
+  return total + section + number;
 }
 
 function extractSize(text: string, department: Department | null, budget: number | null) {
@@ -284,8 +370,17 @@ function extractSize(text: string, department: Department | null, budget: number
 
   const value = standalone[1];
   if (budget !== null && Number(value) === budget) return null;
+  if (/^\d+$/.test(value) && isBudgetAmount(text, value)) return null;
 
   return value.toUpperCase();
+}
+
+function isBudgetAmount(text: string, value: string) {
+  const amountPattern = `(?:${value})(?:元|块|人民币|rmb|cny|以内|以下|左右|上下)?`;
+  return new RegExp(
+    `(?:预算|价格|价位|不超过|不高于|最多|控制在|花费|花销|准备花)\\s*[:：]?\\s*(?:(?:是|为|在|大约|大概|约|最多|不超过)\\s*)*${amountPattern}`,
+    "i",
+  ).test(text);
 }
 
 function extractStorage(text: string) {

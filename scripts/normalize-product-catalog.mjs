@@ -74,6 +74,8 @@ function normalizeProduct(product) {
     sourceSubcategory,
     text,
     name: productIdentity,
+    feature: stringValue(product.feature),
+    craftsmanship: stringValue(product.craftsmanship),
   });
   const gender = department === "apparel" ? classifyGender(text) : null;
   const sizeOptions = extractSizeOptions(text);
@@ -138,6 +140,11 @@ function getNormalizedSubcategory(productType, sourceSubcategory, sourceCategory
     toy: "玩具",
     exercise_equipment: "运动健身器材",
     hand_care: "手部护理",
+    skincare: "护肤用品",
+    personal_care: "个护用品",
+    baby_product: "母婴用品",
+    pet_food: "宠物食品",
+    food: "食品饮料",
   };
   return labels[productType] || sourceSubcategory || sourceCategory || "其他";
 }
@@ -153,6 +160,10 @@ function classifyDepartment({ sourceCategory, sourceSubcategory, text, name }) {
 
   if (containsAny(text, ["动感单车", "健身器材", "跑步机", "exercise bike", "fitness equipment"])) {
     return "fitness";
+  }
+
+  if (containsAny(text, ["婴儿", "婴童", "幼儿", "新生儿", "和尚服", "蝴蝶衣", "爬服", "baby", "infant", "newborn"])) {
+    return "baby";
   }
 
   if (containsAny(text, ["护手霜", "护手", "洗发", "沐浴", "洁面", "护肤", "美妆", "润唇", "卸妆", "身体乳"])) {
@@ -362,10 +373,10 @@ function classifyDepartment({ sourceCategory, sourceSubcategory, text, name }) {
   return "other";
 }
 
-function classifyProductType({ department, sourceCategory, sourceSubcategory, text, name }) {
+function classifyProductType({ department, sourceCategory, sourceSubcategory, text, name, feature, craftsmanship }) {
   const value = `${name} ${sourceCategory}`;
   const sourceValue = `${value} ${sourceSubcategory}`;
-  const details = `${value} ${text}`;
+  const details = `${value} ${sourceSubcategory} ${feature} ${craftsmanship} ${text}`;
 
   if (department === "lighting") return "lamp";
   if (department === "toys") return "toy";
@@ -403,6 +414,11 @@ function classifyProductType({ department, sourceCategory, sourceSubcategory, te
   }
 
   if (department === "appliance") {
+    // Accessory and maintenance products often inherit the parent appliance
+    // subcategory from the source feed. The product name is the authority here.
+    if (containsAny(name, ["清洁片", "清洁剂", "cleaner", "cleaning tablets", "滤芯", "filter", "配件", "accessory"])) {
+      return "other_appliance";
+    }
     if (containsAny(sourceValue, ["空调", "air conditioner"])) return "air_conditioner";
     if (containsAny(sourceValue, ["冰箱", "refrigerator", "fridge"])) return "refrigerator";
     if (containsAny(sourceValue, ["洗衣机", "洗烘", "washer", "dryer", "烘干机"])) return "washer";
@@ -414,12 +430,21 @@ function classifyProductType({ department, sourceCategory, sourceSubcategory, te
   }
 
   if (department === "furniture") {
-    if (containsAny(sourceValue, ["沙发", "sofa"])) return "sofa";
-    if (containsAny(sourceValue, ["床", "bed", "mattress"])) return "bed";
-    if (containsAny(sourceValue, ["skogsta", "斯古塔"])) return "chair";
-    if (containsAny(sourceValue, ["椅", "凳", "chair", "seating"])) return "chair";
-    if (containsAny(sourceValue, ["桌", "table", "desk"])) return "table";
-    if (containsAny(sourceValue, ["柜", "架", "收纳", "storage", "shelf", "cabinet"])) return "storage";
+    const furnitureIdentity = `${name} ${sourceSubcategory}`;
+    if (containsAny(furnitureIdentity, ["沙发", "sofa"])) return "sofa";
+    if (containsAny(furnitureIdentity, ["床", "bed", "mattress"])) return "bed";
+    if (containsAny(furnitureIdentity, ["skogsta", "斯古塔", "椅", "凳", "chair"]) || containsAny(sourceCategory, ["seating"])) return "chair";
+    if (containsAny(furnitureIdentity, ["桌", "table", "desk"]) || containsAny(sourceCategory, ["tables", "desks"])) return "table";
+    if (containsAny(furnitureIdentity, ["柜", "架", "收纳", "storage", "shelf", "cabinet"]) || containsAny(sourceCategory, ["storage furniture", "storage"])) return "storage";
+    // IKEA and similar feeds use model names with no product noun. Use an
+    // explicit noun in the product description only when it describes the
+    // item itself, excluding incidental compatibility/mention text.
+    if (containsAny(feature, ["办公椅", "电脑椅", "office chair", "desk chair"])) return "chair";
+    if (containsAny(feature, ["床架", "platform bed", "bed frame"]) && !containsAny(feature, ["床架和", "床架等", "床架产品"])) return "bed";
+    if (containsAny(feature, ["床垫", "mattress"]) && !containsAny(feature, ["床垫另售", "mattress sold separately"])) return "bed";
+    if (containsAny(feature, ["沙发", "sofa"])) return "sofa";
+    if (containsAny(feature, ["收纳柜", "储物柜", "鞋柜", "衣柜", "storage cabinet", "cabinet"])) return "storage";
+    if (containsAny(feature, ["桌子", "书桌", "办公桌", "餐桌", "茶几", "table", "desk"])) return "table";
     return "other_furniture";
   }
 
@@ -435,6 +460,7 @@ function classifyProductType({ department, sourceCategory, sourceSubcategory, te
 
   if (department === "personal_care") {
     if (containsAny(details, ["护手霜", "护手"])) return "hand_care";
+    if (containsAny(details, ["护肤", "面霜", "乳液", "精华", "洁面", "防晒", "skincare", "moisturizer", "cleanser"])) return "skincare";
     return "personal_care";
   }
   if (department === "fitness") return "exercise_equipment";

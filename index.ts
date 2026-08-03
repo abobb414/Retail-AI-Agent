@@ -244,6 +244,21 @@ async function handleChat(request: Request, env: Env): Promise<Response> {
   }
 
   const payload = validateChatPayload(await parseJsonBody(request));
+  const profile = detectRequestProfile(payload.message);
+  let products: ProductContext[] | null = null;
+
+  // A concrete category with a stated budget is searchable now. If the catalog
+  // has no exact candidate, return that fact instead of delaying the answer and
+  // risking a recommendation from a neighboring category.
+  if (profile.department && profile.productType && profile.budget !== null) {
+    products = await retrieveProductsForMessage(env, payload.message);
+
+    if (products.length === 0) {
+      const nearestProduct = await findNearestProductForMessage(env, payload.message);
+      return jsonResponse(buildNoMatchResponse(payload.message, nearestProduct), 200);
+    }
+  }
+
   const clarificationReply = getClarificationReply(payload.message);
 
   if (clarificationReply) {
@@ -257,7 +272,7 @@ async function handleChat(request: Request, env: Env): Promise<Response> {
     );
   }
 
-  const products = await retrieveProductsForMessage(env, payload.message);
+  products ??= await retrieveProductsForMessage(env, payload.message);
 
   if (products.length === 0) {
     const nearestProduct = await findNearestProductForMessage(env, payload.message);
@@ -686,7 +701,10 @@ async function fetchProductsByStructuredProfile(env: Env, message: string, ignor
   }
 
   if (profile.budget !== null && !ignoreBudget) {
-    conditions.push("price > 0 AND price <= ?");
+    // Keep exact products whose source catalog has no numeric price. They are
+    // valid catalog hits, but the response must disclose that the budget cannot
+    // be verified until the official page is checked.
+    conditions.push("(price IS NULL OR price <= 0 OR (price > 0 AND price <= ?))");
     bindings.push(profile.budget);
   }
 
@@ -848,7 +866,12 @@ function rowToProductContext(row: ProductRow, score: number): ProductContext {
 
 function productMatchesRequest(product: ProductContext, profile: RequestProfile, ignoreBudget = false): boolean {
   if (profile.department && product.department !== profile.department) return false;
-  if (profile.productType && product.product_type !== profile.productType) return false;
+  if (profile.productType === "activewear") {
+    const productText = normalizeIntentText(`${product.name} ${product.description} ${product.subcategory}`);
+    if (product.department !== "apparel" || !/瑜伽|yoga/.test(productText)) return false;
+  } else if (profile.productType && product.product_type !== profile.productType) {
+    return false;
+  }
 
   if (profile.specificIntent && !productMatchesSpecificIntent(product, profile.specificIntent)) return false;
 
@@ -858,7 +881,7 @@ function productMatchesRequest(product: ProductContext, profile: RequestProfile,
     if (product.gender !== profile.gender && product.gender !== "unisex") return false;
   }
 
-  if (!ignoreBudget && profile.budget !== null && (product.price <= 0 || product.price > profile.budget)) return false;
+  if (!ignoreBudget && profile.budget !== null && product.price > 0 && product.price > profile.budget) return false;
 
   if (profile.size && product.department === "apparel") {
     if (!product.size_options.length || !product.size_options.some((size) => normalizeText(size) === normalizeText(profile.size!))) return false;
@@ -878,9 +901,52 @@ function productMatchesRequest(product: ProductContext, profile: RequestProfile,
 }
 
 function productMatchesSpecificIntent(product: ProductContext, intent: string) {
+  const productNameText = normalizeIntentText(product.name);
+  const productCoreText = normalizeIntentText(
+    `${product.name} ${product.subcategory} ${product.product_type} ${JSON.stringify(product.attributes)}`,
+  );
   const productText = normalizeIntentText(
     `${product.name} ${product.subcategory} ${product.description} ${JSON.stringify(product.attributes)}`,
   );
+
+  if (intent === "earphones") {
+    return /耳机|耳塞|buds|headphone|earphone/.test(productCoreText)
+      && !/音箱|音响|speaker|soundbar/.test(productCoreText);
+  }
+
+  if (intent === "speakers") {
+    return /音箱|音响|speaker|soundbar/.test(productCoreText)
+      && !/耳机|耳塞|buds|headphone|earphone/.test(productCoreText);
+  }
+
+  if (intent === "coffee_pot") {
+    return /咖啡壶|手冲壶|滤壶|coffee\s*pot/.test(productNameText)
+      && !/咖啡机|coffee\s*machine|espresso\s*machine/.test(productNameText);
+  }
+
+  if (intent === "coffee_machine") {
+    return /咖啡机|coffee\s*(?:and|&)\s*espresso\s*machine|coffee\s*machine|espresso\s*machine/.test(productNameText)
+      && !/清洁|清洁片|清洁剂|cleaner|cleaning|tablets?|滤芯/.test(productNameText);
+  }
+
+  if (intent === "bed_frame") {
+    return /床架|bed\s*frame|platform\s*bed/.test(productNameText)
+      || (/床架|bed\s*frame/.test(productText) && !/床垫另售|mattress\s+sold\s+separately/.test(productText));
+  }
+
+  if (intent === "mattress") {
+    return /床垫|mattress/.test(productNameText)
+      || (/床垫|mattress/.test(productText) && !/床架|bed\s*frame|mattress\s+sold\s+separately/.test(productText));
+  }
+
+  if (intent === "office_chair") {
+    return /办公椅|电脑椅|office\s*chair|desk\s*chair/.test(productText);
+  }
+
+  if (intent === "floor_lamp") {
+    return /落地灯|floor\s*lamp/.test(productText);
+  }
+
   return getSpecificIntentTerms(intent).some((term) => {
     const normalizedTerm = normalizeIntentText(term);
 
@@ -1056,7 +1122,7 @@ export function getClarificationReply(message: string): string | null {
       break;
     case "fitness":
       if (profile.budget === null) missing.push("预算");
-      if (!hasFurnitureRequirement(message)) missing.push("摆放空间或器材类型");
+      if (!hasFitnessRequirement(message)) missing.push("运动类型或摆放空间");
       break;
     case "stationery":
       if (profile.budget === null) missing.push("预算");
@@ -1187,7 +1253,7 @@ function buildNaturalClarification(profile: RequestProfile, message: string, mis
 
     case "fitness":
       if (!profile.productType) return joinBudget("想练什么，准备在家里还是健身房使用");
-      if (needs.has("摆放空间或器材类型")) return joinBudget("想练什么，家里能留出多大空间");
+      if (needs.has("运动类型或摆放空间")) return joinBudget("想练什么，家里能留出多大空间");
       return budget ? `${budget}？` : "主要想练什么？";
 
     default:
@@ -1196,7 +1262,7 @@ function buildNaturalClarification(profile: RequestProfile, message: string, mis
 }
 
 function hasApplianceRequirement(message: string) {
-  return /面积|平米|㎡|容量|升|安装|预留|嵌入|台式|独立式|匹|能效|制冷|制热|除湿|厨房|客厅|卧室/.test(normalizeIntentText(message));
+  return /面积|平米|㎡|容量|升|公斤|千克|kg|安装|预留|嵌入|台式|独立式|匹|能效|制冷|制热|除湿|厨房|客厅|卧室|阳台/.test(normalizeIntentText(message));
 }
 
 function hasKitchenApplianceRequirement(message: string) {
@@ -1209,6 +1275,10 @@ function hasCleaningApplianceRequirement(message: string) {
 
 function hasFurnitureRequirement(message: string) {
   return /卧室|书房|客厅|餐厅|玄关|厨房|办公室|办公|小户型|租房|儿童房|阳台|尺寸|宽|高|深|cm|厘米|平米|㎡|风格|材质/.test(normalizeIntentText(message));
+}
+
+function hasFitnessRequirement(message: string) {
+  return /有氧|跑步|骑行|单车|力量|瑜伽|运动|健身房|家里|在家|地方|空间|占地|收纳|折叠|安装/.test(normalizeIntentText(message));
 }
 
 function hasHomeGoodsRequirement(message: string) {
@@ -1232,7 +1302,7 @@ function hasPetRequirement(message: string) {
 }
 
 function hasLightingRequirement(message: string) {
-  return /卧室|书房|客厅|床头|办公|阅读|氛围|亮度|色温|摆放|位置/.test(normalizeIntentText(message));
+  return /卧室|书房|客厅|床头|床边|沙发|桌旁|办公|阅读|氛围|亮度|色温|摆放|位置|旁边/.test(normalizeIntentText(message));
 }
 
 function hasToyRequirement(message: string) {
@@ -1263,7 +1333,8 @@ function hashUtf8ToBase36(value: string): string {
 }
 
 function buildRecommendationResponse(message: string, source: ProductContext): ChatResponse {
-  const category = inferDisplayCategory(source);
+  const profile = detectRequestProfile(message);
+  const category = inferDisplayCategory(source, profile.specificIntent, profile.productType);
   return {
     chat_reply: buildDeterministicChatReply(source),
     recommended_product: {
@@ -1287,7 +1358,21 @@ function buildRecommendationResponse(message: string, source: ProductContext): C
   };
 }
 
-function inferDisplayCategory(product: ProductContext): string {
+function inferDisplayCategory(
+  product: ProductContext,
+  specificIntent: string | null = null,
+  requestedProductType: string | null = null,
+): string {
+  const specificLabels: Record<string, string> = {
+    earphones: "耳机",
+    speakers: "音箱",
+    coffee_pot: "咖啡壶",
+    coffee_machine: "咖啡机",
+    bed_frame: "床架",
+    mattress: "床垫",
+    office_chair: "办公椅",
+    floor_lamp: "落地灯",
+  };
   const typeLabels: Record<string, string> = {
     home_textile: "床品家纺",
     home_decor: "家居装饰",
@@ -1299,11 +1384,21 @@ function inferDisplayCategory(product: ProductContext): string {
     digital_accessory: "数码配件",
     personal_care: "个护用品",
     hand_care: "手部护理",
+    activewear: "瑜伽服",
   };
-  return `${DEPARTMENT_LABELS[product.department]} · ${typeLabels[product.product_type] ?? getProductTypeLabel(product.product_type)}`;
+  const productText = normalizeIntentText(`${product.name} ${product.description} ${product.subcategory}`);
+  if (product.department === "apparel" && /瑜伽|yoga/.test(productText)) {
+    return `${DEPARTMENT_LABELS[product.department]} · 瑜伽服`;
+  }
+  const requestedLabel = requestedProductType === "activewear" ? "瑜伽服" : null;
+  return `${DEPARTMENT_LABELS[product.department]} · ${specificLabels[specificIntent ?? ""] ?? requestedLabel ?? typeLabels[product.product_type] ?? getProductTypeLabel(product.product_type)}`;
 }
 
 function buildDeterministicChatReply(product: ProductContext): string {
+  if (product.price <= 0) {
+    return `商品库里有这款 ${product.name}，但目前没有记录价格；先到官网核对价格，再判断是否符合你的预算。`;
+  }
+
   return `这款 ${product.name} 更贴近你刚才补充的条件，可以先作为第一候选看。`;
 }
 
@@ -1312,7 +1407,8 @@ function buildDeterministicWhyBuy(message: string, product: ProductContext): str
   const facts = [`属于${DEPARTMENT_LABELS[product.department]}`];
   if (product.brand) facts.push(`品牌是${product.brand}`);
   if (product.price_display) facts.push(`价格为${product.price_display}`);
-  if (profile.budget !== null) facts.push(`符合不超过${profile.budget}元的预算`);
+  if (profile.budget !== null && product.price > 0) facts.push(`符合不超过${profile.budget}元的预算`);
+  if (profile.budget !== null && product.price <= 0) facts.push("商品库暂未记录价格，预算需要到官网核对");
   if (product.gender) facts.push(`适用对象为${product.gender === "unisex" ? "男女通用" : product.gender === "child" ? "儿童" : product.gender === "male" ? "男性" : "女性"}`);
   const attributeText = Object.entries(product.attributes).slice(0, 2).map(([key, value]) => `${key}为${String(value)}`);
   facts.push(...attributeText);

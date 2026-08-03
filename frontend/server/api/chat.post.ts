@@ -54,7 +54,7 @@ function getLatestUserText(messages: IncomingMessage[]) {
     .trim() ?? ''
 }
 
-function buildWorkerMessage(messages: IncomingMessage[]) {
+export function buildWorkerMessage(messages: IncomingMessage[]) {
   const userMessages = messages
     .filter((message) => message.role === 'user')
     .map((message) => message.content.trim())
@@ -77,8 +77,10 @@ function isStandaloneProductRequest(message: string) {
   const text = normalizeIntentText(message)
   const hasKind = /服饰|服装|数码|手机|平板|电脑|显示器|耳机|手机壳|电器|空调|冰箱|洗衣机|厨房电器|家具|沙发|床|桌|椅|收纳|家居用品|床品|餐具|香薰|个护|护手霜|护肤|食品|零食|宠物|母婴|文具|办公|灯|照明|玩具|围巾|口罩|太阳镜/.test(text)
   const hasReference = /这个|它|上面|刚才|同款|类似/.test(text)
+  const hasTargetedShoppingCue = /(?:想要|买)(?:(?:一|个|套|台|把|张|件|双|款|块|副|部|条|只)\s*)?(?:服饰|服装|数码|手机|平板|电脑|显示器|耳机|手机壳|电器|空调|冰箱|洗衣机|厨房电器|家具|沙发|床|桌|椅|收纳|家居用品|床品|餐具|香薰|个护|护手霜|护肤|食品|零食|宠物|母婴|文具|办公|灯|照明|玩具|围巾|口罩|太阳镜)/.test(text)
+  const hasStandaloneCue = /推荐|想买|想找|需要|有没有|给我|购买|选购|预算|价格|价位|不超过|不高于|元|块|人民币|rmb|cny/.test(text) || hasTargetedShoppingCue
 
-  return hasKind && !hasReference
+  return hasKind && !hasReference && hasStandaloneCue
 }
 
 function normalizeIntentText(message: string) {

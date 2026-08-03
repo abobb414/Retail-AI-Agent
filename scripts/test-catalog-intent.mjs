@@ -14,13 +14,18 @@ const cases = [
   ["宜家沙发", { department: "furniture", brand: "IKEA", productType: "sofa" }],
   ["宜家餐具", { department: "home_goods", brand: "IKEA", productType: "tableware" }],
   ["个护美妆护手霜", { department: "personal_care", productType: "hand_care" }],
-  ["咖啡预算100", { department: "food", productType: "snack", budget: 100 }],
+  ["咖啡预算100", { department: "food", productType: "food", specificIntent: "coffee", budget: 100 }],
   ["猫粮", { department: "pet", productType: "pet_food" }],
   ["婴儿用品", { department: "baby", productType: "baby_product" }],
   ["办公文具", { department: "stationery", productType: "stationery" }],
   ["台灯", { department: "lighting", productType: "lamp" }],
   ["儿童积木", { department: "toys", productType: "toy", gender: "child" }],
   ["动感单车", { department: "fitness", productType: "exercise_equipment" }],
+  ["通勤耳机预算500", { department: "digital", productType: "audio", specificIntent: "earphones", budget: 500 }],
+  ["客厅音箱预算1000", { department: "digital", productType: "audio", specificIntent: "speakers", budget: 1000 }],
+  ["在家做有氧预算2000", { department: "fitness", productType: "exercise_equipment", budget: 2000 }],
+  ["四件套预算500", { department: "home_goods", productType: "home_textile", budget: 500 }],
+  ["女士瑜伽服预算600", { department: "apparel", productType: "activewear", gender: "female", budget: 600 }],
 ];
 
 for (const [message, expected] of cases) {
@@ -35,6 +40,17 @@ const budgetOnlyProfile = detectRequestProfile("手机预算4000");
 assert.equal(budgetOnlyProfile.budget, 4000);
 assert.equal(budgetOnlyProfile.size, null);
 
+const budgetFollowUpProfile = detectRequestProfile("给我推荐一款男士跑步鞋预算500；好的预算800");
+assert.equal(budgetFollowUpProfile.productType, "shoes");
+assert.equal(budgetFollowUpProfile.specificIntent, "running_shoe");
+assert.equal(budgetFollowUpProfile.gender, "male");
+assert.equal(budgetFollowUpProfile.budget, 800);
+assert.equal(budgetFollowUpProfile.size, null);
+
+const contextMustNotReplaceProductProfile = detectRequestProfile("给我推荐一块室内照明灯具预算300；阅读照明，放在沙发旁边");
+assert.equal(contextMustNotReplaceProductProfile.department, "lighting");
+assert.equal(contextMustNotReplaceProductProfile.productType, "lamp");
+
 const clarificationCases = [
   ["给我推荐一款手机", "你想看哪个品牌或具体型号？预算大概多少？"],
   ["手机预算4000", "你想看哪个品牌或具体型号？"],
@@ -46,7 +62,7 @@ const clarificationCases = [
   ["宜家沙发", "准备放在哪个空间，尺寸大概多大？预算大概多少？"],
   ["台灯", "准备放在哪儿，主要是阅读照明还是氛围灯？预算大概多少？"],
   ["男士运动服", "预算大概多少？"],
-  ["动感单车", "想练什么，家里能留出多大空间？预算大概多少？"],
+  ["动感单车", "预算大概多少？"],
   ["服饰", "你想找上衣、裤装、鞋、外套还是配件？预算大概多少？"],
   ["电器", "你想看空调、冰箱、洗衣机还是其他电器？预算大概多少？"],
   ["家居用品", "你想看餐厨、床品、装饰还是收纳用品？预算大概多少？"],
