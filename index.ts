@@ -48,7 +48,7 @@ import {
   type Department,
   type Gender,
   type RequestProfile,
-} from "./catalogTaxonomy";
+} from "./catalogTaxonomy.ts";
 
 type RawProduct = {
   id: string;
@@ -167,11 +167,11 @@ type ChatResponse = {
 };
 
 class HttpError extends Error {
-  constructor(
-    public readonly status: number,
-    message: string,
-  ) {
+  readonly status: number;
+
+  constructor(status: number, message: string) {
     super(message);
+    this.status = status;
   }
 }
 
@@ -854,12 +854,12 @@ function scoreProductForMessage(
   return score;
 }
 
-function getClarificationReply(message: string): string | null {
+export function getClarificationReply(message: string): string | null {
   const profile = detectRequestProfile(message);
   const text = normalizeIntentText(message);
 
   if (!profile.department && (isRecommendationRequest(text) || profile.brand)) {
-    return `我会先按商品库分类查找。你想找${Object.values(DEPARTMENT_LABELS).filter((label) => label !== "其他").join("、")}里的哪一类？再告诉我具体商品类型和预算。`;
+    return "你想买哪类商品？比如手机、服饰、家具或家居用品。预算大概多少？";
   }
 
   if (!profile.department) return null;
@@ -884,6 +884,12 @@ function getClarificationReply(message: string): string | null {
       if (profile.budget === null) missing.push("预算");
       if (requiresApplianceDetails(profile.productType) && !hasApplianceRequirement(message)) {
         missing.push("容量、面积或安装条件");
+      }
+      if (profile.productType === "kitchen_appliance" && !hasKitchenApplianceRequirement(message)) {
+        missing.push("使用方式");
+      }
+      if (profile.productType === "cleaning_appliance" && !hasCleaningApplianceRequirement(message)) {
+        missing.push("使用场景");
       }
       break;
     case "furniture":
@@ -931,11 +937,7 @@ function getClarificationReply(message: string): string | null {
 
   if (!missing.length) return null;
 
-  const question = missing.slice(0, 2).join("、");
-  if (profile.department === "digital") {
-    return `数码先确认${question}，手机只核对型号、品牌、预算和规格，不追问面积或安装条件。`;
-  }
-  return `还差一点关键信息：${question}。补充后我只在${DEPARTMENT_LABELS[profile.department]}分类里筛选。`;
+  return buildNaturalClarification(profile, message, missing);
 }
 
 function isRecommendationRequest(text: string) {
@@ -948,30 +950,131 @@ function hasBroadApparelRequest(message: string) {
 
 function getDepartmentTypePrompt(department: Department): string {
   const prompts: Record<Department, string> = {
-    apparel: "服饰里的上衣、裤装、鞋、外套或配件",
-    digital: "数码里的手机、平板、电脑、显示器、耳机或配件",
-    appliance: "电器里的空调、冰箱、洗衣机、厨房电器或清洁电器",
-    furniture: "家具里的沙发、床、桌、椅或收纳柜",
-    home_goods: "家居用品里的餐厨、床品、家居装饰或收纳用品",
-    personal_care: "个护美妆里的护肤、洗护或护手产品",
-    food: "食品饮料里的零食、茶、咖啡或饮品",
-    pet: "宠物用品里的主粮、零食或日用品",
-    baby: "母婴用品里的衣物、寝具或日用品",
-    stationery: "文具办公里的书写、收纳或办公用品",
-    lighting: "照明灯具里的台灯、落地灯或其他灯具",
-    toys: "玩具里的积木、轨道或其他儿童玩具",
-    fitness: "运动健身里的动感单车、跑步机或其他器材",
+    apparel: "上衣、裤装、鞋、外套或配件",
+    digital: "手机、平板、电脑、显示器、耳机或配件",
+    appliance: "空调、冰箱、洗衣机、厨房电器或清洁电器",
+    furniture: "沙发、床、桌、椅或收纳柜",
+    home_goods: "餐厨、床品、家居装饰或收纳用品",
+    personal_care: "护肤、洗护或护手产品",
+    food: "零食、茶、咖啡或饮品",
+    pet: "主粮、零食或日用品",
+    baby: "衣物、寝具或日用品",
+    stationery: "书写、收纳或办公用品",
+    lighting: "台灯、落地灯或其他灯具",
+    toys: "积木、轨道或其他儿童玩具",
+    fitness: "动感单车、跑步机或其他器材",
     other: "具体商品类型",
   };
   return prompts[department];
 }
 
 function requiresApplianceDetails(productType: string | null) {
-  return ["air_conditioner", "refrigerator", "washer", "dishwasher", "kitchen_appliance", "cleaning_appliance"].includes(productType ?? "");
+  return ["air_conditioner", "refrigerator", "washer", "dishwasher"].includes(productType ?? "");
+}
+
+function buildNaturalClarification(profile: RequestProfile, message: string, missing: string[]) {
+  const needs = new Set(missing);
+  const budget = needs.has("预算") ? "预算大概多少" : "";
+  const joinBudget = (question: string) => budget ? `${question}？${budget}？` : `${question}？`;
+
+  switch (profile.department) {
+    case "apparel":
+      if (!profile.productType && needs.has(getDepartmentTypePrompt("apparel"))) {
+        return joinBudget("你想找上衣、裤装、鞋、外套还是配件");
+      }
+      if (!profile.gender && !profile.size) {
+        return joinBudget("准备给男士、女士还是中性款");
+      }
+      return budget ? `${budget}？` : "你平时穿什么尺码？";
+
+    case "digital":
+      if (!profile.productType) {
+        return joinBudget("你想买手机、平板、电脑、耳机还是其他数码产品");
+      }
+      if (["phone", "tablet", "computer", "monitor"].includes(profile.productType) && !profile.brand) {
+        return joinBudget("你想看哪个品牌或具体型号");
+      }
+      return budget ? `${budget}？` : "你对屏幕尺寸、内存或存储有要求吗？";
+
+    case "appliance":
+      if (profile.productType === "air_conditioner" && needs.has("容量、面积或安装条件")) {
+        return joinBudget("房间大概多大、安装位置有什么限制");
+      }
+      if (profile.productType === "refrigerator" && needs.has("容量、面积或安装条件")) {
+        return joinBudget("需要多大容量，摆放位置的宽度或深度有限制吗");
+      }
+      if (["washer", "dishwasher"].includes(profile.productType ?? "") && needs.has("容量、面积或安装条件")) {
+        return joinBudget("需要多大容量，准备独立摆放还是嵌入安装");
+      }
+      if (!profile.productType) return joinBudget("你想看空调、冰箱、洗衣机还是其他电器");
+      if (profile.productType === "kitchen_appliance" && needs.has("使用方式")) {
+        return joinBudget("平时主要用它做什么");
+      }
+      if (profile.productType === "cleaning_appliance" && needs.has("使用场景")) {
+        return joinBudget("主要清洁地板、地毯还是宠物毛发");
+      }
+      return budget ? `${budget}？` : "你更在意哪些功能？";
+
+    case "furniture":
+      if (!profile.productType) return joinBudget("你想找沙发、床、桌、椅还是收纳柜");
+      if (needs.has("摆放空间或尺寸")) return joinBudget("准备放在哪个空间，尺寸大概多大");
+      return budget ? `${budget}？` : "你准备把它放在哪个空间？";
+
+    case "home_goods":
+      if (!profile.productType) return joinBudget("你想看餐厨、床品、装饰还是收纳用品");
+      if (needs.has("具体用途或尺寸")) return joinBudget("主要准备怎么用，尺寸有要求吗");
+      return budget ? `${budget}？` : "主要准备怎么用？";
+
+    case "personal_care":
+      if (!profile.productType) return joinBudget("你想看护肤、洗护还是护手产品");
+      if (needs.has("使用需求或肤质")) return joinBudget("你主要想解决什么问题，肤质有什么特点");
+      return budget ? `${budget}？` : "你主要想改善哪方面？";
+
+    case "food":
+      if (!profile.productType) return joinBudget("你想看零食、茶、咖啡还是饮品");
+      if (needs.has("口味或数量")) return joinBudget("想要什么口味或类型，需要多少");
+      return budget ? `${budget}？` : "想要什么口味或类型？";
+
+    case "pet":
+      if (needs.has("宠物种类或年龄")) return joinBudget("家里养的是猫还是狗，年龄或体型怎样");
+      return budget ? `${budget}？` : "家里养的是什么宠物？";
+
+    case "baby":
+      if (needs.has("适用年龄或对象")) return joinBudget("宝宝多大了，准备给谁用");
+      return budget ? `${budget}？` : "准备给多大的宝宝用？";
+
+    case "stationery":
+      if (!profile.productType) return joinBudget("主要是书写、收纳还是办公使用");
+      return budget ? `${budget}？` : "主要准备怎么用？";
+
+    case "lighting":
+      if (needs.has("摆放位置或照明需求")) return joinBudget("准备放在哪儿，主要是阅读照明还是氛围灯");
+      return budget ? `${budget}？` : "准备放在哪个位置？";
+
+    case "toys":
+      if (needs.has("适用年龄或玩法")) return joinBudget("给多大的孩子玩，更想要哪种玩法");
+      return budget ? `${budget}？` : "给多大的孩子玩？";
+
+    case "fitness":
+      if (!profile.productType) return joinBudget("想练什么，准备在家里还是健身房使用");
+      if (needs.has("摆放空间或器材类型")) return joinBudget("想练什么，家里能留出多大空间");
+      return budget ? `${budget}？` : "主要想练什么？";
+
+    default:
+      return budget ? `${budget}？` : "你想找哪类具体商品？";
+  }
 }
 
 function hasApplianceRequirement(message: string) {
   return /面积|平米|㎡|容量|升|安装|预留|嵌入|台式|独立式|匹|能效|制冷|制热|除湿|厨房|客厅|卧室/.test(normalizeIntentText(message));
+}
+
+function hasKitchenApplianceRequirement(message: string) {
+  return /浓缩|美式|拿铁|胶囊|全自动|半自动|烘焙|烤箱|面包|料理|微波|加热/.test(normalizeIntentText(message));
+}
+
+function hasCleaningApplianceRequirement(message: string) {
+  return /地板|地毯|毛发|宠物|除螨|家具|车内|床垫/.test(normalizeIntentText(message));
 }
 
 function hasFurnitureRequirement(message: string) {
@@ -1112,15 +1215,15 @@ function cleanConsultantText(value: string): string {
     .trim();
 }
 
-function buildNoMatchResponse(message?: string): ChatResponse {
+export function buildNoMatchResponse(message?: string): ChatResponse {
   const profile = message ? detectRequestProfile(message) : null;
   const constraints = profile
     ? [
         profile.brand,
         profile.productType ? getProductTypeLabel(profile.productType) : profile.department ? DEPARTMENT_LABELS[profile.department] : null,
-        profile.gender ? `性别=${profile.gender}` : null,
-        profile.size ? `尺码=${profile.size}` : null,
-        profile.budget !== null ? `预算不超过${profile.budget}元` : null,
+        profile.gender ? profile.gender === "male" ? "男士" : profile.gender === "female" ? "女士" : profile.gender === "child" ? "儿童" : "中性款" : null,
+        profile.size ? `尺码${profile.size}` : null,
+        profile.budget !== null ? `预算${profile.budget}元以内` : null,
         profile.screenSizeInch !== null ? `${profile.screenSizeInch}寸` : null,
         profile.storageGb !== null ? `${profile.storageGb}GB` : null,
       ].filter(Boolean).join("、")
@@ -1128,8 +1231,8 @@ function buildNoMatchResponse(message?: string): ChatResponse {
 
   return {
     chat_reply: constraints
-      ? `我扫描了真实商品库，但没有找到同时符合${constraints}的商品。不会用其他分类的商品替代推荐。`
-      : "我扫描了真实商品库，但没有找到符合这次需求的商品，不会编造或跨分类推荐。",
+      ? `我查了下商品库，暂时没有找到符合${constraints}的商品。你可以换个品牌、型号或预算，我再帮你看看。`
+      : "我查了下商品库，暂时没有找到符合这次需求的商品。你可以补充其他要求，我再帮你看看。",
     recommended_product: null,
     stage: "no_vector_match",
   };
