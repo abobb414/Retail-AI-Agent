@@ -14,6 +14,10 @@ interface WorkerRecommendedProduct {
   name: string
   brand: string
   category?: string
+  department?: string
+  product_type?: string
+  gender?: string | null
+  attributes?: Record<string, unknown>
   price_display: string
   image: string
   url: string
@@ -71,13 +75,10 @@ function buildWorkerMessage(messages: IncomingMessage[]) {
 
 function isStandaloneProductRequest(message: string) {
   const text = normalizeIntentText(message)
-  const hasKind = /半袖|短袖|t恤|tee|上衣|衬衫|polo|鞋|裤|外套|夹克|卫衣|包|灯|照明|台灯|香薰|收纳|床品|小家具|椅|桌|沙发|空调|冰箱|洗衣机|烤箱|咖啡机/.test(text)
-  const hasBudget = /\d+(?:\.\d+)?\s*(?:元|块|rmb|cny|以内|以下|左右|上下)|预算/.test(text)
-  const hasAudience = /男士|男生|男子|男款|男式|女士|女生|女子|女款|女式|儿童|孩子|宝宝|中性/.test(text)
-  const hasScene = /通勤|上班|办公室|跑步|健身|训练|户外|日常|休闲|卧室|客厅|厨房|书房|小卧室|小户型/.test(text)
-  const hasSwitchCue = /再给我|换|重新|另外|下一轮|新/.test(text)
+  const hasKind = /服饰|服装|数码|手机|平板|电脑|显示器|耳机|手机壳|电器|空调|冰箱|洗衣机|厨房电器|家具|沙发|床|桌|椅|收纳|家居用品|床品|餐具|香薰|个护|护手霜|护肤|食品|零食|宠物|母婴|文具|办公|灯|照明|玩具|围巾|口罩|太阳镜/.test(text)
+  const hasReference = /这个|它|上面|刚才|同款|类似/.test(text)
 
-  return hasKind && (hasBudget || hasAudience || hasScene || hasSwitchCue)
+  return hasKind && !hasReference
 }
 
 function normalizeIntentText(message: string) {
@@ -93,7 +94,7 @@ function toRecommendation(product: WorkerRecommendedProduct) {
   return {
     name: product.name,
     brand: product.brand,
-    category: product.category || inferDisplayCategory(product),
+    category: product.category || product.department || '商品',
     image: product.image,
     price_range: product.price_display,
     budget_tier: '',
@@ -112,64 +113,6 @@ function toRecommendation(product: WorkerRecommendedProduct) {
     scenarios: [],
     source_url: product.url,
   }
-}
-
-function inferDisplayCategory(product: WorkerRecommendedProduct) {
-  const text = normalizeIntentText(`${product.name} ${product.brand} ${product.why_buy}`)
-
-  if (/灯|照明|台灯|落地灯|吊灯|壁灯|氛围灯|橱柜照明|led/.test(text)) {
-    return '照明灯具'
-  }
-
-  if (/香薰|香氛|精油|扩香/.test(text)) {
-    return '家居香氛'
-  }
-
-  if (/收纳|置物|储物|柜|架|盒|箱|篮/.test(text)) {
-    return '收纳整理'
-  }
-
-  if (/椅|凳|沙发/.test(text)) {
-    return '座椅沙发'
-  }
-
-  if (/桌|茶几|书桌|餐桌/.test(text)) {
-    return '桌几'
-  }
-
-  if (/床品|床单|被套|枕|床笠|毯/.test(text)) {
-    return '床品家纺'
-  }
-
-  if (/空调|冰箱|洗衣机|烤箱|咖啡机|洗碗机|电饭煲|家电/.test(text)) {
-    return '家用电器'
-  }
-
-  if (/半袖|短袖|t恤|tee|polo|圆领|上衣/.test(text)) {
-    return 'T恤/短袖'
-  }
-
-  if (/跑鞋|运动鞋|篮球鞋|足球鞋|板鞋|德训鞋|鞋|靴|凉鞋/.test(text)) {
-    return '鞋履'
-  }
-
-  if (/运动裤|短裤|长裤|裤/.test(text)) {
-    return '裤装'
-  }
-
-  if (/外套|夹克|冲锋衣|卫衣|风衣|羽绒服/.test(text)) {
-    return '外套'
-  }
-
-  if (/背包|斜挎包|单肩包|托特包|包/.test(text)) {
-    return '包袋'
-  }
-
-  if (/宠物|猫|狗/.test(text)) {
-    return '宠物用品'
-  }
-
-  return '精选商品'
 }
 
 function mergeRecommendationCopy(

@@ -7,12 +7,15 @@ WORKER_URL=https://your-worker.your-subdomain.workers.dev \
 node scripts/import-real-products.mjs
 ```
 
-The script reads `frontend/server/data/realProducts.json`, extracts the `products`
-array, splits it into batches, and POSTs each batch to the Worker.
+The script reads `frontend/server/data/realProducts.json`, merges structured
+facets from `frontend/server/data/productFacets.json` by product ID, splits the
+products into batches, and POSTs each batch to the Worker.
 
 Optional environment variables:
 
 - `PRODUCTS_FILE`: product JSON path. Default: `frontend/server/data/realProducts.json`
+- `FACETS_FILE`: normalized facet JSON path. Default: `frontend/server/data/productFacets.json`
+- `REQUIRE_FACETS`: fail when a product has no facet record. Default: `true`
 - `BATCH_SIZE`: products per POST request. Default: `8`
 - `CONCURRENCY`: parallel POST workers. Default: `1`
 - `RETRY_ATTEMPTS`: attempts per failed batch. Default: `3`

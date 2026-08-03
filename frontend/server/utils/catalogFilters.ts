@@ -90,20 +90,25 @@ export function hasRequestedBrand(text: string) {
 }
 
 export function getRequestedBudget(text: string) {
-  const budgetMatch = text.match(/(?:预算|价格|价位)?\s*(\d{2,6})\s*(元|块|以内|以下|左右|上下)?/)
-  if (!budgetMatch) {
-    return null
+  const normalized = text.replace(/[,，]/g, '')
+  const amountPattern = '(\\d{2,6}(?:\\.\\d+)?)'
+  const contextualMatch = normalized.match(
+    new RegExp(
+      `(?:预算|价格|价位|不超过|不高于|最多|控制在|花费|花销|准备花)\\s*[:：]?\\s*(?:(?:是|为|在|大约|大概|约|最多|不超过)\\s*)*${amountPattern}`,
+      'i',
+    ),
+  )
+  const suffixedMatch = normalized.match(
+    new RegExp(`${amountPattern}\\s*(?:元|块|人民币|rmb|cny|以内|以下|左右|上下)`, 'i'),
+  )
+  const explicitMatch = contextualMatch ?? suffixedMatch
+  if (explicitMatch) {
+    const budget = Number(explicitMatch[1])
+    return Number.isFinite(budget) ? budget : null
   }
 
-  const budget = Number(budgetMatch[1])
-  if (!Number.isFinite(budget)) return null
-
-  // "左右" or "上下" → ±50% flexibility
-  const suffix = budgetMatch[2]
-  if (suffix === '左右' || suffix === '上下') {
-    return Math.round(budget * 1.5)
-  }
-  return budget
+  const lastSegment = normalized.split(/[；;。!?！？]/).map((segment) => segment.trim()).filter(Boolean).at(-1) ?? ''
+  return /^\d{2,6}(?:\.\d+)?$/.test(lastSegment) ? Number(lastSegment) : null
 }
 
 const _priceCache = new Map<string, number | null>()
@@ -157,4 +162,3 @@ export function isProductWithinBudget(product: CatalogProduct, text: string) {
 
   return price <= budget
 }
-

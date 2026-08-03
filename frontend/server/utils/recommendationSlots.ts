@@ -2,7 +2,20 @@ import type { ProductFamily, SlotRequirement } from './catalogTypes'
 import { getDominantIntent, getRequestedProductFamily } from './catalogIntents'
 
 function hasBudgetSignal(text: string) {
-  return /预算|价格|价位|\d{2,6}\s*(元|块|以内|以下|左右|上下)|低预算|中预算|高预算|便宜|平价|贵一点|不差钱/.test(text)
+  const normalized = text.replace(/[,，]/g, '')
+  const contextualBudget = /(?:预算|价格|价位|不超过|不高于|最多|控制在|花费|花销|准备花)\s*[:：]?\s*(?:(?:是|为|在|大约|大概|约|最多|不超过)\s*)*\d{2,6}(?:\.\d+)?/i
+  const suffixedBudget = /\d{2,6}(?:\.\d+)?\s*(?:元|块|人民币|rmb|cny|以内|以下|左右|上下)/i
+
+  if (
+    contextualBudget.test(normalized) ||
+    suffixedBudget.test(normalized) ||
+    /低预算|中预算|高预算|便宜|平价|贵一点|不差钱/.test(normalized)
+  ) {
+    return true
+  }
+
+  const lastSegment = normalized.split(/[；;。!?！？]/).map((segment) => segment.trim()).filter(Boolean).at(-1) ?? ''
+  return /^\d{2,6}(?:\.\d+)?$/.test(lastSegment)
 }
 
 function hasWearerSignal(text: string) {

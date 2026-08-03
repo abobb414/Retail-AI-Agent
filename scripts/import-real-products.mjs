@@ -11,6 +11,9 @@ const workerUrl = process.env.WORKER_URL;
 const productsFile = resolve(
   process.env.PRODUCTS_FILE ?? "frontend/server/data/realProducts.json",
 );
+const facetsFile = resolve(
+  process.env.FACETS_FILE ?? "frontend/server/data/productFacets.json",
+);
 const batchSize = readPositiveInteger("BATCH_SIZE", 8);
 const concurrency = readPositiveInteger("CONCURRENCY", 1);
 const retryAttempts = readPositiveInteger("RETRY_ATTEMPTS", 3);
@@ -30,14 +33,29 @@ if (!workerUrl) {
 }
 
 const products = await loadProducts(productsFile);
-const selectedProducts = products.slice(
+const facetsById = await loadProductFacets(facetsFile);
+const productsWithFacets = products.map((product) => {
+  const facets = facetsById.get(product.id);
+  return facets ? { ...product, ...facets } : product;
+});
+const missingFacetIds = productsWithFacets
+  .filter((product) => !facetsById.has(product.id))
+  .map((product) => product.id);
+
+if (missingFacetIds.length > 0 && process.env.REQUIRE_FACETS !== "false") {
+  throw new Error(
+    `Missing structured facets for ${missingFacetIds.length} products in ${facetsFile}. Set REQUIRE_FACETS=false only for a deliberate legacy import.`,
+  );
+}
+
+const selectedProducts = productsWithFacets.slice(
   startIndex,
   limit ? startIndex + limit : undefined,
 );
 const batches = chunk(selectedProducts, batchSize);
 
 console.log(
-  `Importing ${selectedProducts.length} products from ${productsFile} to ${workerUrl}`,
+  `Importing ${selectedProducts.length} products from ${productsFile} with facets from ${facetsFile} to ${workerUrl}`,
 );
 console.log(
   `Batch size: ${batchSize}, concurrency: ${concurrency}, retry attempts: ${retryAttempts}, client: ${postClient}`,
@@ -88,6 +106,22 @@ async function loadProducts(filePath) {
   }
 
   throw new Error("Product file must be a JSON array or an object with a products array.");
+}
+
+async function loadProductFacets(filePath) {
+  const raw = await readFile(filePath, "utf8");
+  const parsed = JSON.parse(raw);
+  const products = Array.isArray(parsed) ? parsed : parsed?.products;
+
+  if (!Array.isArray(products)) {
+    throw new Error("Facet file must be a JSON array or an object with a products array.");
+  }
+
+  const facetsById = new Map();
+  for (const product of products) {
+    if (product && typeof product.id === "string") facetsById.set(product.id, product);
+  }
+  return facetsById;
 }
 
 async function postBatch(batch, batchIndex, absoluteStart) {

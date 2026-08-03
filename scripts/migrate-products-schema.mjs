@@ -17,6 +17,12 @@ const requiredColumns = [
   ["image", "TEXT"],
   ["ideal_for", "TEXT"],
   ["avoid_for", "TEXT"],
+  ["department", "TEXT"],
+  ["product_type", "TEXT"],
+  ["subcategory", "TEXT"],
+  ["gender", "TEXT"],
+  ["size_options", "TEXT"],
+  ["attributes", "TEXT"],
 ];
 
 runWranglerSql(`CREATE TABLE IF NOT EXISTS products (
@@ -30,7 +36,13 @@ runWranglerSql(`CREATE TABLE IF NOT EXISTS products (
   description TEXT,
   image TEXT,
   ideal_for TEXT,
-  avoid_for TEXT
+  avoid_for TEXT,
+  department TEXT,
+  product_type TEXT,
+  subcategory TEXT,
+  gender TEXT,
+  size_options TEXT,
+  attributes TEXT
 );`);
 
 const tableInfo = runWranglerSql("PRAGMA table_info(products);");
@@ -49,6 +61,8 @@ for (const [columnName, columnType] of requiredColumns) {
 }
 
 runWranglerSql("CREATE UNIQUE INDEX IF NOT EXISTS products_vector_id_idx ON products(vector_id);");
+runWranglerSql("CREATE INDEX IF NOT EXISTS products_department_type_idx ON products(department, product_type);");
+runWranglerSql("CREATE INDEX IF NOT EXISTS products_brand_idx ON products(brand);");
 
 console.log("Products schema migration complete.");
 

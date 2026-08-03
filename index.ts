@@ -12,7 +12,13 @@
  *     description TEXT,
  *     image TEXT,
  *     ideal_for TEXT,
- *     avoid_for TEXT
+ *     avoid_for TEXT,
+ *     department TEXT,
+ *     product_type TEXT,
+ *     subcategory TEXT,
+ *     gender TEXT,
+ *     size_options TEXT,
+ *     attributes TEXT
  * );
  *
  * If you already created the smaller table from the first import version, add:
@@ -32,6 +38,17 @@ export interface Env {
   AI: Ai;
 }
 
+import {
+  DEPARTMENT_LABELS,
+  detectRequestProfile,
+  getProductTypeLabel,
+  getSearchTerms,
+  normalizeText,
+  type Department,
+  type Gender,
+  type RequestProfile,
+} from "./catalogTaxonomy";
+
 type RawProduct = {
   id: string;
   name: string;
@@ -43,6 +60,14 @@ type RawProduct = {
   keywords?: string[];
   ideal_for?: string[];
   avoid_for?: string[];
+  department?: Department;
+  product_type?: string;
+  subcategory?: string;
+  gender?: Gender | null;
+  size_options?: string[];
+  attributes?: Record<string, unknown>;
+  price_cny?: number | null;
+  price_display?: string;
 };
 
 type CleanProduct = {
@@ -57,6 +82,12 @@ type CleanProduct = {
   image: string;
   idealFor: string[];
   avoidFor: string[];
+  department: Department;
+  productType: string;
+  subcategory: string;
+  gender: Gender | null;
+  sizeOptions: string[];
+  attributes: Record<string, unknown>;
   embeddingText: string;
 };
 
@@ -72,6 +103,12 @@ type ProductRow = {
   image: string | null;
   ideal_for: string | null;
   avoid_for: string | null;
+  department: Department | null;
+  product_type: string | null;
+  subcategory: string | null;
+  gender: Gender | null;
+  size_options: string | null;
+  attributes: string | null;
 };
 
 type ProductContext = {
@@ -86,6 +123,12 @@ type ProductContext = {
   image: string;
   ideal_for: string[];
   avoid_for: string[];
+  department: Department;
+  product_type: string;
+  subcategory: string;
+  gender: Gender | null;
+  size_options: string[];
+  attributes: Record<string, unknown>;
   vector_score: number;
 };
 
@@ -103,6 +146,10 @@ type RecommendedProduct = {
   name: string;
   brand: string;
   category: string;
+  department: string;
+  product_type: string;
+  gender: Gender | null;
+  attributes: Record<string, unknown>;
   price_display: string;
   image: string;
   url: string;
@@ -117,8 +164,6 @@ type ChatResponse = {
   recommended_product: RecommendedProduct | null;
   stage?: "clarify_slots" | "rag_recommendation" | "no_vector_match";
 };
-
-type AudiencePreference = "male" | "female" | "child" | "pet" | null;
 
 class HttpError extends Error {
   constructor(
@@ -203,7 +248,7 @@ async function handleChat(request: Request, env: Env): Promise<Response> {
   const products = await retrieveProductsForMessage(env, payload.message);
 
   if (products.length === 0) {
-    return jsonResponse(buildNoMatchResponse(), 200);
+    return jsonResponse(buildNoMatchResponse(payload.message), 200);
   }
 
   return jsonResponse(buildRecommendationResponse(payload.message, products[0]), 200);
@@ -320,27 +365,62 @@ function validateRawProduct(item: unknown, index: number): RawProduct {
     keywords: normalizeStringArray(product.keywords),
     ideal_for: normalizeStringArray(product.ideal_for),
     avoid_for: normalizeStringArray(product.avoid_for),
+    department: isDepartment(product.department) ? product.department : "other",
+    product_type: typeof product.product_type === "string" ? product.product_type : "other",
+    subcategory: typeof product.subcategory === "string" ? product.subcategory : "",
+    gender: isGender(product.gender) ? product.gender : null,
+    size_options: normalizeStringArray(product.size_options),
+    attributes: isRecord(product.attributes) ? product.attributes : {},
+    price_cny: typeof product.price_cny === "number" && Number.isFinite(product.price_cny)
+      ? product.price_cny
+      : product.price_cny === null
+        ? null
+        : undefined,
+    price_display: typeof product.price_display === "string" ? product.price_display : "",
   };
 }
 
 function cleanProduct(item: RawProduct): CleanProduct {
   const description = item.feature?.trim() ?? "";
   const keywords = item.keywords ?? [];
-  const priceDisplay = item.price_range?.trim() ?? "";
+  const price = item.price_cny === null ? 0 : item.price_cny ?? parsePriceFromProduct(item);
+  const priceDisplay = item.price_display?.trim() || (price > 0 ? `CNY ${price}` : item.price_cny === null ? "价格以官网为准" : item.price_range?.trim() ?? "价格以官网为准");
+  const department = isDepartment(item.department) ? item.department : "other";
+  const productType = item.product_type?.trim() || "other";
+  const subcategory = item.subcategory?.trim() || "";
+  const gender = isGender(item.gender) ? item.gender : null;
+  const sizeOptions = item.size_options ?? [];
+  const attributes = item.attributes ?? {};
 
   return {
     id: item.id,
     vectorId: createVectorId(item.id),
     name: item.name.trim(),
     brand: item.brand?.trim() || inferBrand(item),
-    price: parsePrice(priceDisplay),
+    price,
     priceDisplay,
     url: item.source_url?.trim() ?? "",
     description,
     image: item.image?.trim() ?? "",
     idealFor: item.ideal_for ?? [],
     avoidFor: item.avoid_for ?? [],
-    embeddingText: `商品名称: ${item.name.trim()}。核心特征: ${description}。标签: ${keywords.join(", ")}`,
+    department,
+    productType,
+    subcategory,
+    gender,
+    sizeOptions,
+    attributes,
+    embeddingText: [
+      `商品名称: ${item.name.trim()}`,
+      `一级分类: ${DEPARTMENT_LABELS[department]}`,
+      `商品类型: ${productType}`,
+      subcategory ? `细分类目: ${subcategory}` : "",
+      gender ? `性别: ${gender}` : "",
+      sizeOptions.length ? `可选尺寸: ${sizeOptions.join(", ")}` : "",
+      Object.keys(attributes).length ? `规格属性: ${JSON.stringify(attributes)}` : "",
+      `核心特征: ${description}`,
+      `标签: ${keywords.join(", ")}`,
+    ].filter(Boolean).join("。"),
   };
 }
 
@@ -351,6 +431,15 @@ function parsePrice(priceRange?: string): number {
 
   const match = priceRange.replace(/,/g, "").match(/(\d+(?:\.\d+)?)/);
   return match ? Number(match[1]) : 0;
+}
+
+function parsePriceFromProduct(item: RawProduct): number {
+  const explicitPrice = [...[item.name, ...(item.keywords ?? []), item.price_range ?? ""].join(" ").matchAll(/(\d{2,6}(?:\.\d+)?)\s*(?:元|块)(?:起)?/g)]
+    .map((match) => Number(match[1]))
+    .filter((value) => Number.isFinite(value));
+
+  if (explicitPrice.length) return Math.min(...explicitPrice);
+  return parsePrice(item.price_range);
 }
 
 async function generateSingleEmbedding(env: Env, text: string): Promise<number[]> {
@@ -422,9 +511,10 @@ async function writeProductsToD1(env: Env, products: CleanProduct[]): Promise<vo
   const statements = products.map((product) =>
     env.DB.prepare(
       `INSERT INTO products (
-         id, vector_id, name, brand, price, price_display, url, description, image, ideal_for, avoid_for
+         id, vector_id, name, brand, price, price_display, url, description, image, ideal_for, avoid_for,
+         department, product_type, subcategory, gender, size_options, attributes
        )
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          vector_id = excluded.vector_id,
          name = excluded.name,
@@ -435,7 +525,13 @@ async function writeProductsToD1(env: Env, products: CleanProduct[]): Promise<vo
          description = excluded.description,
          image = excluded.image,
          ideal_for = excluded.ideal_for,
-         avoid_for = excluded.avoid_for`,
+         avoid_for = excluded.avoid_for,
+         department = excluded.department,
+         product_type = excluded.product_type,
+         subcategory = excluded.subcategory,
+         gender = excluded.gender,
+         size_options = excluded.size_options,
+         attributes = excluded.attributes`,
     ).bind(
       product.id,
       product.vectorId,
@@ -448,6 +544,12 @@ async function writeProductsToD1(env: Env, products: CleanProduct[]): Promise<vo
       product.image,
       JSON.stringify(product.idealFor),
       JSON.stringify(product.avoidFor),
+      product.department,
+      product.productType,
+      product.subcategory,
+      product.gender,
+      JSON.stringify(product.sizeOptions),
+      JSON.stringify(product.attributes),
     ),
   );
 
@@ -465,7 +567,8 @@ async function fetchProductsByVectorMatches(
   }
 
   const placeholders = ids.map(() => "?").join(", ");
-  const query = `SELECT id, vector_id, name, brand, price, price_display, url, description, image, ideal_for, avoid_for
+  const query = `SELECT id, vector_id, name, brand, price, price_display, url, description, image, ideal_for, avoid_for,
+                        department, product_type, subcategory, gender, size_options, attributes
                  FROM products
                  WHERE vector_id IN (${placeholders}) OR id IN (${placeholders})`;
   const result = await env.DB.prepare(query).bind(...ids, ...ids).all<ProductRow>();
@@ -525,11 +628,8 @@ async function safeProductSearch(
 }
 
 function selectCandidateProducts(message: string, products: ProductContext[]): ProductContext[] {
-  const audienceFilteredProducts = filterProductsByAudience(message, products);
-  const kindFilteredProducts = filterProductsByRequestedKind(message, audienceFilteredProducts);
-  const budgetFilteredProducts = selectProductsForMessage(message, kindFilteredProducts);
-
-  return extractCnyBudget(message) ? budgetFilteredProducts : kindFilteredProducts;
+  const profile = detectRequestProfile(message);
+  return products.filter((product) => productMatchesRequest(product, profile));
 }
 
 async function fetchProductsBySemanticSearch(env: Env, message: string): Promise<ProductContext[]> {
@@ -556,7 +656,20 @@ async function fetchProductsByLexicalSearch(env: Env, message: string): Promise<
     return [];
   }
 
-  const searchableColumns = ["id", "name", "brand", "description", "ideal_for", "avoid_for"];
+  const searchableColumns = [
+    "id",
+    "name",
+    "brand",
+    "description",
+    "ideal_for",
+    "avoid_for",
+    "department",
+    "product_type",
+    "subcategory",
+    "gender",
+    "size_options",
+    "attributes",
+  ];
   const whereClauses: string[] = [];
   const bindings: string[] = [];
 
@@ -570,7 +683,8 @@ async function fetchProductsByLexicalSearch(env: Env, message: string): Promise<
   }
 
   const result = await env.DB.prepare(
-    `SELECT id, vector_id, name, brand, price, price_display, url, description, image, ideal_for, avoid_for
+    `SELECT id, vector_id, name, brand, price, price_display, url, description, image, ideal_for, avoid_for,
+            department, product_type, subcategory, gender, size_options, attributes
      FROM products
      WHERE ${whereClauses.join(" OR ")}
      LIMIT ${LEXICAL_TOP_K}`,
@@ -608,256 +722,57 @@ function rowToProductContext(row: ProductRow, score: number): ProductContext {
     image: row.image || "",
     ideal_for: parseJsonStringArray(row.ideal_for),
     avoid_for: parseJsonStringArray(row.avoid_for),
+    department: isDepartment(row.department) ? row.department : "other",
+    product_type: row.product_type || "other",
+    subcategory: row.subcategory || "",
+    gender: isGender(row.gender) ? row.gender : null,
+    size_options: parseJsonStringArray(row.size_options),
+    attributes: parseJsonRecord(row.attributes),
     vector_score: score,
   };
 }
 
-function selectProductsForMessage(message: string, products: ProductContext[]): ProductContext[] {
-  const budget = extractCnyBudget(message);
+function productMatchesRequest(product: ProductContext, profile: RequestProfile): boolean {
+  if (profile.department && product.department !== profile.department) return false;
+  if (profile.productType && product.product_type !== profile.productType) return false;
 
-  if (!budget) {
-    return products;
+  if (profile.brand && normalizeText(product.brand) !== normalizeText(profile.brand)) return false;
+
+  if (profile.gender && product.department === "apparel") {
+    if (product.gender !== profile.gender && product.gender !== "unisex") return false;
   }
 
-  return products.filter((product) => product.price > 0 && product.price <= budget);
+  if (profile.budget !== null && (product.price <= 0 || product.price > profile.budget)) return false;
+
+  if (profile.size && product.department === "apparel") {
+    if (!product.size_options.length || !product.size_options.some((size) => normalizeText(size) === normalizeText(profile.size!))) return false;
+  }
+
+  if (profile.screenSizeInch !== null) {
+    const value = numericAttribute(product.attributes, "screen_size_inch");
+    if (value === null || value !== profile.screenSizeInch) return false;
+  }
+
+  if (profile.storageGb !== null) {
+    const value = numericAttribute(product.attributes, "storage_gb");
+    if (value === null || value < profile.storageGb) return false;
+  }
+
+  return true;
 }
 
-function filterProductsByAudience(message: string, products: ProductContext[]): ProductContext[] {
-  const audience = detectAudiencePreference(normalizeIntentText(message));
-
-  if (!audience) {
-    return products.filter((product) => !productLooksPetOnly(product));
-  }
-
-  return products.filter((product) => productMatchesAudience(product, audience));
-}
-
-function filterProductsByRequestedKind(message: string, products: ProductContext[]): ProductContext[] {
-  const kinds = detectRequestedProductKinds(normalizeIntentText(message));
-
-  if (kinds.length === 0) {
-    return products;
-  }
-
-  return products.filter((product) => kinds.some((kind) => productMatchesKind(product, kind)));
-}
-
-function detectRequestedProductKind(text: string): "tee" | "shoe" | "pants" | "outerwear" | "bag" | null {
-  return detectRequestedProductKinds(text)[0] ?? null;
-}
-
-function detectRequestedProductKinds(text: string): Array<"tee" | "shoe" | "pants" | "outerwear" | "bag"> {
-  const kinds: Array<"tee" | "shoe" | "pants" | "outerwear" | "bag"> = [];
-
-  if (/跑鞋|运动鞋|篮球鞋|足球鞋|板鞋|德训鞋|鞋子|鞋|靴|凉鞋/.test(text)) {
-    kinds.push("shoe");
-  }
-
-  if (/半袖|短袖|t恤|tee|圆领|polo衫|上衣/.test(text)) {
-    kinds.push("tee");
-  }
-
-  if (/运动裤|短裤|长裤|裤子|裤/.test(text)) {
-    kinds.push("pants");
-  }
-
-  if (/外套|夹克|冲锋衣|卫衣|风衣|羽绒服/.test(text)) {
-    kinds.push("outerwear");
-  }
-
-  if (/背包|斜挎包|单肩包|托特包|包包|包/.test(text)) {
-    kinds.push("bag");
-  }
-
-  return kinds;
-}
-
-function productMatchesKind(product: ProductContext, kind: NonNullable<ReturnType<typeof detectRequestedProductKind>>): boolean {
-  const text = normalizeIntentText(`${product.name} ${product.description} ${product.brand}`);
-
-  switch (kind) {
-    case "tee":
-      return /半袖|短袖|t恤|tee|圆领|polo衫|上衣/.test(text) && !/鞋|靴|裤|裙|帽|包|手套/.test(text);
-    case "shoe":
-      return /跑鞋|运动鞋|篮球鞋|足球鞋|板鞋|德训鞋|鞋|靴|凉鞋/.test(text);
-    case "pants":
-      return /运动裤|短裤|长裤|裤/.test(text) && !/鞋|包|帽|手套/.test(text);
-    case "outerwear":
-      return /外套|夹克|冲锋衣|卫衣|风衣|羽绒服/.test(text);
-    case "bag":
-      return /背包|斜挎包|单肩包|托特包|包/.test(text) && !/鞋|裤/.test(text);
-  }
-}
-
-function detectAudiencePreference(text: string): AudiencePreference {
-  if (/宠物|猫|狗/.test(text)) {
-    return "pet";
-  }
-
-  if (/儿童|孩子|小孩|宝宝|婴儿|幼儿|童装|男童|女童/.test(text)) {
-    return "child";
-  }
-
-  if (/女士|女生|女子|女款|女式|女性|女装|women|womens|woman/.test(text)) {
-    return "female";
-  }
-
-  if (/男士|男生|男子|男款|男式|男性|男装|(^|[^a-z])(?:men|mens|man)([^a-z]|$)/.test(text)) {
-    return "male";
-  }
-
-  return null;
-}
-
-function productMatchesAudience(product: ProductContext, audience: NonNullable<AudiencePreference>): boolean {
-  const text = getProductAudienceText(product);
-
-  switch (audience) {
-    case "male":
-      return !productLooksChildOnly(text) && !productLooksPetOnly(product) && !productLooksFemaleOnly(text);
-    case "female":
-      return !productLooksChildOnly(text) && !productLooksPetOnly(product) && !productLooksMaleOnly(text);
-    case "child":
-      return productLooksChildOnly(text);
-    case "pet":
-      return productLooksPetOnly(product);
-  }
-}
-
-function getProductAudienceText(product: ProductContext): string {
-  return normalizeIntentText(
-    `${product.name} ${product.description} ${product.brand} ${product.ideal_for.join(" ")} ${product.avoid_for.join(" ")}`,
-  );
-}
-
-function productLooksChildOnly(text: string): boolean {
-  return /儿童|孩子|宝宝|婴儿|幼儿|童装|男童|女童|110cm|120cm|130cm|140cm|150cm|160cm/.test(text);
-}
-
-function productLooksPetOnly(product: ProductContext): boolean {
-  return /宠物|猫|狗/.test(getProductAudienceText(product));
-}
-
-function productLooksFemaleOnly(text: string): boolean {
-  if (/男士\/女士|女士\/男士|男女|男\/女|中性|unisex/.test(text)) {
-    return false;
-  }
-
-  return /女士|女生|女子|女款|女式|女性|女装|连衣裙|半身裙|裙装|文胸|胸衣|bra|women|womens|woman/.test(text);
-}
-
-function productLooksMaleOnly(text: string): boolean {
-  if (/男士\/女士|女士\/男士|男女|男\/女|中性|unisex/.test(text)) {
-    return false;
-  }
-
-  return /男士|男生|男子|男款|男式|男性|男装|(^|[^a-z])(?:men|mens|man)([^a-z]|$)/.test(text);
-}
-
-function extractCnyBudget(message: string): number | null {
-  const normalized = message.replace(/[,，]/g, "");
-  const patterns = [
-    /预算\s*(?:在|是|大概|约|为|控制在)?\s*(\d+(?:\.\d+)?)\s*(?:元|块|rmb|cny)?\s*(?:左右|上下|附近|以内|以下|内)?/gi,
-    /(?:价位|价格|预算|控制在|不超过|别超过)\D{0,8}(\d+(?:\.\d+)?)\s*(?:元|块|rmb|cny)?/gi,
-    /(\d+(?:\.\d+)?)\s*(?:元|块|rmb|cny)\s*(?:左右|上下|附近|以内|以下|内)?/gi,
-    /(\d+(?:\.\d+)?)\s*(?:左右|上下|以内|以下|内)/gi,
-  ];
-  const matches: Array<{ index: number; value: number }> = [];
-
-  for (const pattern of patterns) {
-    for (const match of normalized.matchAll(pattern)) {
-      const value = Number(match[1]);
-
-      if (Number.isFinite(value) && value > 0) {
-        matches.push({ index: match.index ?? 0, value });
-      }
-    }
-  }
-
-  if (matches.length === 0) {
-    return null;
-  }
-
-  matches.sort((left, right) => left.index - right.index);
-  return matches[matches.length - 1].value;
+function numericAttribute(attributes: Record<string, unknown>, key: string) {
+  const value = attributes[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function buildLexicalSearchTerms(message: string): string[] {
-  const normalized = normalizeIntentText(message);
   const terms = new Set<string>();
-  const knownTerms = [
-    "半袖",
-    "短袖",
-    "t恤",
-    "tee",
-    "圆领",
-    "polo",
-    "上衣",
-    "跑鞋",
-    "运动鞋",
-    "篮球鞋",
-    "足球鞋",
-    "板鞋",
-    "德训鞋",
-    "鞋",
-    "运动裤",
-    "短裤",
-    "长裤",
-    "裤",
-    "外套",
-    "夹克",
-    "卫衣",
-    "背包",
-    "包",
-    "通勤",
-    "跑步",
-    "户外",
-    "健身",
-    "训练",
-    "篮球",
-    "足球",
-    "日常",
-    "休闲",
-    "透气",
-    "速干",
-    "轻便",
-    "防水",
-    "保暖",
-    "adidas",
-    "阿迪达斯",
-    "nike",
-    "耐克",
-    "uniqlo",
-    "优衣库",
-    "muji",
-    "无印良品",
-    "ikea",
-    "宜家",
-    "男士",
-    "男生",
-    "男子",
-    "男款",
-    "男式",
-    "女士",
-    "女生",
-    "女子",
-    "女款",
-    "女式",
-    "儿童",
-    "童装",
-  ];
+  const profile = detectRequestProfile(message);
 
-  for (const term of knownTerms) {
-    if (normalized.includes(term)) {
-      terms.add(term);
-    }
-  }
-
-  for (const kind of detectRequestedProductKinds(normalized)) {
-    for (const term of productKindSearchTerms(kind)) {
-      terms.add(term);
-    }
-  }
+  if (profile.department) terms.add(profile.department);
+  if (profile.productType) terms.add(profile.productType);
+  for (const term of getSearchTerms(profile)) terms.add(term);
 
   for (const code of message.toLowerCase().match(/[a-z0-9][a-z0-9_-]{2,}/g) ?? []) {
     if (!/^\d+$/.test(code)) {
@@ -876,40 +791,24 @@ function buildLexicalSearchTerms(message: string): string[] {
   return [...terms];
 }
 
-function productKindSearchTerms(kind: NonNullable<ReturnType<typeof detectRequestedProductKind>>): string[] {
-  switch (kind) {
-    case "tee":
-      return ["半袖", "短袖", "t恤", "tee", "圆领", "polo", "上衣"];
-    case "shoe":
-      return ["鞋", "跑鞋", "运动鞋", "篮球鞋", "足球鞋", "板鞋"];
-    case "pants":
-      return ["裤", "运动裤", "短裤", "长裤"];
-    case "outerwear":
-      return ["外套", "夹克", "卫衣", "冲锋衣"];
-    case "bag":
-      return ["包", "背包", "斜挎包", "单肩包"];
-  }
-}
-
 function isGenericSearchChunk(value: string): boolean {
   return /^(推荐|想买|想找|想看|看看|有没有|买|选|需要|预算|男生|女生|男士|女士|中性|以内|以下|左右|上下)$/.test(value);
 }
 
 function rankProductsForMessage(message: string, products: ProductContext[]): ProductContext[] {
-  const budget = extractCnyBudget(message);
-  const kinds = detectRequestedProductKinds(normalizeIntentText(message));
+  const profile = detectRequestProfile(message);
   const terms = buildLexicalSearchTerms(message);
 
   return [...products].sort((left, right) => {
-    const rightScore = scoreProductForMessage(right, message, terms, kinds, budget);
-    const leftScore = scoreProductForMessage(left, message, terms, kinds, budget);
+    const rightScore = scoreProductForMessage(right, message, terms, profile);
+    const leftScore = scoreProductForMessage(left, message, terms, profile);
 
     if (rightScore !== leftScore) {
       return rightScore - leftScore;
     }
 
-    if (budget) {
-      return Math.abs((left.price || budget) - budget) - Math.abs((right.price || budget) - budget);
+    if (profile.budget !== null) {
+      return Math.abs((left.price || profile.budget) - profile.budget) - Math.abs((right.price || profile.budget) - profile.budget);
     }
 
     return left.name.localeCompare(right.name, "zh-Hans-CN");
@@ -920,11 +819,10 @@ function scoreProductForMessage(
   product: ProductContext,
   message: string,
   terms: string[],
-  kinds: Array<"tee" | "shoe" | "pants" | "outerwear" | "bag">,
-  budget: number | null,
+  profile: RequestProfile,
 ): number {
   const productText = normalizeIntentText(
-    `${product.id} ${product.name} ${product.brand} ${product.description} ${product.ideal_for.join(" ")} ${product.avoid_for.join(" ")}`,
+    `${product.id} ${product.name} ${product.brand} ${product.department} ${product.product_type} ${product.subcategory} ${product.gender ?? ""} ${JSON.stringify(product.attributes)} ${product.description}`,
   );
   let score = product.vector_score * 80;
 
@@ -946,104 +844,165 @@ function scoreProductForMessage(
     score += 20;
   }
 
-  if (kinds.some((kind) => productMatchesKind(product, kind))) {
-    score += 35;
-  }
-
-  if (budget && product.price > 0) {
-    score += product.price <= budget ? 18 : -80;
-  }
-
-  const audience = detectAudiencePreference(normalizeIntentText(message));
-
-  if (audience && productMatchesAudience(product, audience)) {
-    score += 24;
-  }
-
-  const scene = getSceneLabel(message);
-
-  if (scene && productText.includes(normalizeIntentText(scene))) {
-    score += 8;
-  }
+  if (profile.department === product.department) score += 40;
+  if (profile.productType === product.product_type) score += 80;
+  if (profile.brand && normalizeText(product.brand) === normalizeText(profile.brand)) score += 35;
+  if (profile.gender && product.gender === profile.gender) score += 24;
+  if (profile.budget !== null && product.price > 0) score += product.price <= profile.budget ? 18 : -80;
 
   return score;
 }
 
 function getClarificationReply(message: string): string | null {
+  const profile = detectRequestProfile(message);
   const text = normalizeIntentText(message);
-  const category = detectRequestCategory(text);
-  const hasBudget = extractCnyBudget(message) !== null || /预算|便宜|贵|高端|入门|性价比/.test(text);
-  const hasGenderOrRecipient = /男|女|中性|儿童|孩子|宝宝|老人|宠物|送人|自用|自己/.test(text);
-  const hasScene = /通勤|上班|办公室|跑步|健身|训练|篮球|足球|户外|旅行|出差|上学|夏天|冬天|春秋|卧室|客厅|厨房|书房|餐厅|小户型|宿舍|日常|居家|运动|工作|睡觉|收纳/.test(text);
-  const hasStyleOrSize = /舒服|舒适|透气|轻便|防水|保暖|宽松|修身|简约|正式|休闲|耐用|好看|质感|尺码|尺寸|码|平米|面积|容量/.test(text);
 
-  if (!category && /推荐|想买|想找|想看|看看|有没有|买|选|需要|预算/.test(text)) {
-    return "可以的，我先不急着推单品。你想看哪一类商品？顺便告诉我预算和使用场景，我再从真实商品库里挑。";
+  if (!profile.department && (isRecommendationRequest(text) || profile.brand)) {
+    return `我会先按商品库分类查找。你想找${Object.values(DEPARTMENT_LABELS).filter((label) => label !== "其他").join("、")}里的哪一类？再告诉我具体商品类型和预算。`;
   }
 
-  if (category === "wearable") {
-    const missing = [
-      !hasGenderOrRecipient ? "男士、女士、中性或尺码" : "",
-      !hasBudget ? "预算" : "",
-      !hasScene && !hasStyleOrSize ? "穿着场景" : "",
-    ].filter(Boolean);
+  if (!profile.department) return null;
 
-    if (missing.length > 0) {
-      return `还差一点关键信息：${missing.join("、")}。补一句就行，比如“男士 300 元，户外跑步”。`;
-    }
+  const missing: string[] = [];
+  if (!profile.productType) {
+    missing.push(getDepartmentTypePrompt(profile.department));
   }
 
-  if (category === "home") {
-    const missing = [
-      !hasScene ? "放在哪个空间或主要解决什么问题" : "",
-      !hasBudget ? "预算大概多少" : "",
-    ].filter(Boolean);
-
-    if (missing.length > 0) {
-      return `还差一点关键信息：${missing.join("，")}。补一句后我再给你推具体款。`;
-    }
+  switch (profile.department) {
+    case "apparel":
+      if (!profile.gender && !profile.size) missing.push("穿着对象或尺码");
+      if (profile.budget === null) missing.push("预算");
+      break;
+    case "digital":
+      if (!profile.brand && ["phone", "tablet", "computer", "monitor"].includes(profile.productType ?? "")) {
+        missing.push("品牌或具体型号");
+      }
+      if (profile.budget === null) missing.push("预算");
+      break;
+    case "appliance":
+      if (profile.budget === null) missing.push("预算");
+      if (requiresApplianceDetails(profile.productType) && !hasApplianceRequirement(message)) {
+        missing.push("容量、面积或安装条件");
+      }
+      break;
+    case "furniture":
+      if (profile.budget === null) missing.push("预算");
+      if (profile.productType && !hasFurnitureRequirement(message)) missing.push("摆放空间或尺寸");
+      break;
+    case "home_goods":
+      if (profile.budget === null) missing.push("预算");
+      if (!hasHomeGoodsRequirement(message)) missing.push("具体用途或尺寸");
+      break;
+    case "personal_care":
+      if (profile.budget === null) missing.push("预算");
+      if (!hasPersonalCareRequirement(message)) missing.push("使用需求或肤质");
+      break;
+    case "food":
+      if (profile.budget === null) missing.push("预算");
+      if (!hasFoodRequirement(message)) missing.push("口味或数量");
+      break;
+    case "baby":
+      if (profile.budget === null) missing.push("预算");
+      if (!hasBabyRequirement(message)) missing.push("适用年龄或对象");
+      break;
+    case "pet":
+      if (profile.budget === null) missing.push("预算");
+      if (!hasPetRequirement(message)) missing.push("宠物种类或年龄");
+      break;
+    case "lighting":
+      if (profile.budget === null) missing.push("预算");
+      if (!hasLightingRequirement(message)) missing.push("摆放位置或照明需求");
+      break;
+    case "toys":
+      if (profile.budget === null) missing.push("预算");
+      if (!hasToyRequirement(message)) missing.push("适用年龄或玩法");
+      break;
+    case "fitness":
+      if (profile.budget === null) missing.push("预算");
+      if (!hasFurnitureRequirement(message)) missing.push("摆放空间或器材类型");
+      break;
+    case "stationery":
+      if (profile.budget === null) missing.push("预算");
+      break;
+    default:
+      if (profile.budget === null) missing.push("预算");
   }
 
-  if (category === "appliance") {
-    const missing = [
-      !hasScene && !hasStyleOrSize ? "使用场景、面积、容量或安装条件" : "",
-      !hasBudget ? "预算范围" : "",
-    ].filter(Boolean);
+  if (!missing.length) return null;
 
-    if (missing.length > 0) {
-      return `这类商品先别盲推，还差：${missing.join("，")}。补一句后我再帮你缩到具体选择。`;
-    }
+  const question = missing.slice(0, 2).join("、");
+  if (profile.department === "digital") {
+    return `数码先确认${question}，手机只核对型号、品牌、预算和规格，不追问面积或安装条件。`;
   }
+  return `还差一点关键信息：${question}。补充后我只在${DEPARTMENT_LABELS[profile.department]}分类里筛选。`;
+}
 
-  if (category === "living_context") {
-    return "这个场景可以做，但我先确认方向：你更想看灯光、收纳、床品、小家具，还是运动穿搭？再给我一个预算，我就能更像顾问一样帮你挑。";
-  }
+function isRecommendationRequest(text: string) {
+  return /推荐|想买|想找|想看|有没有|买|选|需要|预算|商品|产品|查一下|看看/.test(text);
+}
 
-  return null;
+function getDepartmentTypePrompt(department: Department): string {
+  const prompts: Record<Department, string> = {
+    apparel: "服饰里的上衣、裤装、鞋、外套或配件",
+    digital: "数码里的手机、平板、电脑、显示器、耳机或配件",
+    appliance: "电器里的空调、冰箱、洗衣机、厨房电器或清洁电器",
+    furniture: "家具里的沙发、床、桌、椅或收纳柜",
+    home_goods: "家居用品里的餐厨、床品、家居装饰或收纳用品",
+    personal_care: "个护美妆里的护肤、洗护或护手产品",
+    food: "食品饮料里的零食、茶、咖啡或饮品",
+    pet: "宠物用品里的主粮、零食或日用品",
+    baby: "母婴用品里的衣物、寝具或日用品",
+    stationery: "文具办公里的书写、收纳或办公用品",
+    lighting: "照明灯具里的台灯、落地灯或其他灯具",
+    toys: "玩具里的积木、轨道或其他儿童玩具",
+    fitness: "运动健身里的动感单车、跑步机或其他器材",
+    other: "具体商品类型",
+  };
+  return prompts[department];
+}
+
+function requiresApplianceDetails(productType: string | null) {
+  return ["air_conditioner", "refrigerator", "washer", "dishwasher", "kitchen_appliance", "cleaning_appliance"].includes(productType ?? "");
+}
+
+function hasApplianceRequirement(message: string) {
+  return /面积|平米|㎡|容量|升|安装|预留|嵌入|台式|独立式|匹|能效|制冷|制热|除湿|厨房|客厅|卧室/.test(normalizeIntentText(message));
+}
+
+function hasFurnitureRequirement(message: string) {
+  return /卧室|书房|客厅|餐厅|玄关|厨房|办公室|办公|小户型|租房|儿童房|阳台|尺寸|宽|高|深|cm|厘米|平米|㎡|风格|材质/.test(normalizeIntentText(message));
+}
+
+function hasHomeGoodsRequirement(message: string) {
+  return /厨房|餐桌|卧室|床|收纳|装饰|香薰|用途|尺寸|宽|高|深|cm|厘米|套|个|件/.test(normalizeIntentText(message));
+}
+
+function hasPersonalCareRequirement(message: string) {
+  return /肤质|敏感|干燥|保湿|清洁|香味|护手|洗发|沐浴|护肤|使用|需求/.test(normalizeIntentText(message));
+}
+
+function hasFoodRequirement(message: string) {
+  return /口味|甜|咸|辣|无糖|咖啡因|数量|几包|几盒|送人|早餐|零食|饮料/.test(normalizeIntentText(message));
+}
+
+function hasBabyRequirement(message: string) {
+  return /年龄|月龄|岁|男童|女童|宝宝|婴儿|儿童|对象|尺码/.test(normalizeIntentText(message));
+}
+
+function hasPetRequirement(message: string) {
+  return /猫|狗|幼年|成年|年龄|体重|口味|对象/.test(normalizeIntentText(message));
+}
+
+function hasLightingRequirement(message: string) {
+  return /卧室|书房|客厅|床头|办公|阅读|氛围|亮度|色温|摆放|位置/.test(normalizeIntentText(message));
+}
+
+function hasToyRequirement(message: string) {
+  return /年龄|岁|儿童|孩子|宝宝|积木|轨道|玩法|送礼/.test(normalizeIntentText(message));
 }
 
 function normalizeIntentText(message: string): string {
   return message.toLowerCase().replace(/\s+/g, "");
-}
-
-function detectRequestCategory(text: string): "wearable" | "home" | "appliance" | "living_context" | null {
-  if (/鞋|跑鞋|运动鞋|篮球鞋|足球鞋|板鞋|凉鞋|靴|半袖|t恤|tee|上衣|裤|短裤|运动裤|外套|夹克|卫衣|衬衫|polo|裙|内衣|袜|帽|包/.test(text)) {
-    return "wearable";
-  }
-
-  if (/椅|桌|床(?!头)|柜|沙发|架|收纳|灯|照明|台灯|地毯|床品|枕|被|家具/.test(text)) {
-    return "home";
-  }
-
-  if (/空调|冰箱|洗衣机|洗碗机|烤箱|微波炉|咖啡机|吸尘器|扫地|电视|音箱|耳机|手机|电脑|电器|家电/.test(text)) {
-    return "appliance";
-  }
-
-  if (/卧室|客厅|厨房|书房|小户型|宿舍|通勤|运动|舒服|舒适|氛围|生活/.test(text)) {
-    return "living_context";
-  }
-
-  return null;
 }
 
 function createVectorId(productId: string): string {
@@ -1066,13 +1025,18 @@ function hashUtf8ToBase36(value: string): string {
 }
 
 function buildRecommendationResponse(message: string, source: ProductContext): ChatResponse {
+  const category = inferDisplayCategory(source);
   return {
     chat_reply: buildDeterministicChatReply(source),
     recommended_product: {
       id: source.id,
       name: source.name,
       brand: source.brand || "精选品牌",
-      category: inferDisplayCategory(source),
+      category,
+      department: DEPARTMENT_LABELS[source.department],
+      product_type: source.product_type,
+      gender: source.gender,
+      attributes: source.attributes,
       price_display: source.price_display,
       image: source.image,
       url: source.url,
@@ -1086,63 +1050,19 @@ function buildRecommendationResponse(message: string, source: ProductContext): C
 }
 
 function inferDisplayCategory(product: ProductContext): string {
-  const text = normalizeIntentText(
-    `${product.name} ${product.description} ${product.brand} ${product.ideal_for.join(" ")} ${product.avoid_for.join(" ")}`,
-  );
-
-  if (/灯|照明|台灯|落地灯|吊灯|壁灯|氛围灯|橱柜照明|led/.test(text)) {
-    return "照明灯具";
-  }
-
-  if (/香薰|香氛|精油|扩香/.test(text)) {
-    return "家居香氛";
-  }
-
-  if (/收纳|置物|储物|柜|架|盒|箱|篮/.test(text)) {
-    return "收纳整理";
-  }
-
-  if (/椅|凳|沙发/.test(text)) {
-    return "座椅沙发";
-  }
-
-  if (/桌|茶几|书桌|餐桌/.test(text)) {
-    return "桌几";
-  }
-
-  if (/床品|床单|被套|枕|床笠|毯/.test(text)) {
-    return "床品家纺";
-  }
-
-  if (/空调|冰箱|洗衣机|烤箱|咖啡机|洗碗机|电饭煲|家电/.test(text)) {
-    return "家用电器";
-  }
-
-  if (/半袖|短袖|t恤|tee|polo|圆领|上衣/.test(text)) {
-    return "T恤/短袖";
-  }
-
-  if (/跑鞋|运动鞋|篮球鞋|足球鞋|板鞋|德训鞋|鞋|靴|凉鞋/.test(text)) {
-    return "鞋履";
-  }
-
-  if (/运动裤|短裤|长裤|裤/.test(text)) {
-    return "裤装";
-  }
-
-  if (/外套|夹克|冲锋衣|卫衣|风衣|羽绒服/.test(text)) {
-    return "外套";
-  }
-
-  if (/背包|斜挎包|单肩包|托特包|包/.test(text)) {
-    return "包袋";
-  }
-
-  if (/宠物|猫|狗/.test(text)) {
-    return "宠物用品";
-  }
-
-  return "精选商品";
+  const typeLabels: Record<string, string> = {
+    home_textile: "床品家纺",
+    home_decor: "家居装饰",
+    home_organization: "家居收纳",
+    tableware: "餐厨用品",
+    lamp: "灯具",
+    toy: "儿童玩具",
+    apparel_accessory: "服饰配件",
+    digital_accessory: "数码配件",
+    personal_care: "个护用品",
+    hand_care: "手部护理",
+  };
+  return `${DEPARTMENT_LABELS[product.department]} · ${typeLabels[product.product_type] ?? getProductTypeLabel(product.product_type)}`;
 }
 
 function buildDeterministicChatReply(product: ProductContext): string {
@@ -1150,57 +1070,20 @@ function buildDeterministicChatReply(product: ProductContext): string {
 }
 
 function buildDeterministicWhyBuy(message: string, product: ProductContext): string {
-  const kind = detectRequestedProductKind(normalizeIntentText(message));
-  const budget = extractCnyBudget(message);
-  const scene = getSceneLabel(message);
-  const kindLabel = kind ? productKindLabel(kind) : "这个品类";
-  const budgetText = budget ? `价格在 ${budget} 元预算内` : "价格和需求比较匹配";
-  const sceneText = scene ? `，${scene}用起来也顺手` : "";
-
-  return `它属于${kindLabel}，${budgetText}${sceneText}，可以先作为这一轮的重点候选。`;
+  const profile = detectRequestProfile(message);
+  const facts = [`属于${DEPARTMENT_LABELS[product.department]}`];
+  if (product.brand) facts.push(`品牌是${product.brand}`);
+  if (product.price_display) facts.push(`价格为${product.price_display}`);
+  if (profile.budget !== null) facts.push(`符合不超过${profile.budget}元的预算`);
+  if (product.gender) facts.push(`适用对象为${product.gender === "unisex" ? "男女通用" : product.gender === "child" ? "儿童" : product.gender === "male" ? "男性" : "女性"}`);
+  const attributeText = Object.entries(product.attributes).slice(0, 2).map(([key, value]) => `${key}为${String(value)}`);
+  facts.push(...attributeText);
+  return `${facts.join("，")}，可以作为当前条件下的真实商品候选。`;
 }
 
 function buildDeterministicNextStep(product: ProductContext): string {
-  return product.url
-    ? "下一步先看官网尺码、库存和实拍细节，再决定是否下单。"
-    : "下一步先确认尺码、库存和实拍细节，再决定是否下单。";
-}
-
-function productKindLabel(kind: NonNullable<ReturnType<typeof detectRequestedProductKind>>): string {
-  switch (kind) {
-    case "tee":
-      return "短袖上衣";
-    case "shoe":
-      return "鞋类单品";
-    case "pants":
-      return "裤装";
-    case "outerwear":
-      return "外套";
-    case "bag":
-      return "包袋";
-  }
-}
-
-function getSceneLabel(message: string): string {
-  const text = normalizeIntentText(message);
-
-  if (/户外.*跑|跑步|越野/.test(text)) {
-    return "户外跑步";
-  }
-
-  if (/通勤|上班|办公室/.test(text)) {
-    return "通勤";
-  }
-
-  if (/健身|训练|运动/.test(text)) {
-    return "运动训练";
-  }
-
-  if (/日常|休闲/.test(text)) {
-    return "日常穿着";
-  }
-
-  return "";
+  if (product.url) return "下一步查看官网的规格、库存和售后信息，再决定是否下单。";
+  return "下一步先确认商品规格、库存和售后信息，再决定是否下单。";
 }
 
 function isUsableConsultantText(value: unknown): value is string {
@@ -1224,11 +1107,24 @@ function cleanConsultantText(value: string): string {
     .trim();
 }
 
-function buildNoMatchResponse(chatReply?: string): ChatResponse {
+function buildNoMatchResponse(message?: string): ChatResponse {
+  const profile = message ? detectRequestProfile(message) : null;
+  const constraints = profile
+    ? [
+        profile.brand,
+        profile.productType ? getProductTypeLabel(profile.productType) : profile.department ? DEPARTMENT_LABELS[profile.department] : null,
+        profile.gender ? `性别=${profile.gender}` : null,
+        profile.size ? `尺码=${profile.size}` : null,
+        profile.budget !== null ? `预算不超过${profile.budget}元` : null,
+        profile.screenSizeInch !== null ? `${profile.screenSizeInch}寸` : null,
+        profile.storageGb !== null ? `${profile.storageGb}GB` : null,
+      ].filter(Boolean).join("、")
+    : "";
+
   return {
-    chat_reply:
-      chatReply ||
-      "我暂时没有在真实商品库里找到足够匹配的单品。你可以换个说法，比如告诉我预算、使用场景或想要的品类。",
+    chat_reply: constraints
+      ? `我扫描了真实商品库，但没有找到同时符合${constraints}的商品。不会用其他分类的商品替代推荐。`
+      : "我扫描了真实商品库，但没有找到符合这次需求的商品，不会编造或跨分类推荐。",
     recommended_product: null,
     stage: "no_vector_match",
   };
@@ -1240,8 +1136,31 @@ function normalizeStringArray(value: unknown): string[] {
     : [];
 }
 
-function inferBrand(item: Pick<RawProduct, "id" | "name" | "source_url">): string {
-  const text = `${item.id} ${item.name} ${item.source_url ?? ""}`.toLowerCase();
+function isDepartment(value: unknown): value is Department {
+  return typeof value === "string" && value in DEPARTMENT_LABELS;
+}
+
+function isGender(value: unknown): value is Gender {
+  return value === "male" || value === "female" || value === "child" || value === "unisex";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function parseJsonRecord(value: string | null): Record<string, unknown> {
+  if (!value) return {};
+
+  try {
+    const parsed = JSON.parse(value);
+    return isRecord(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function inferBrand(item: { id: string; name: string; source_url?: string; url?: string }): string {
+  const text = `${item.id} ${item.name} ${item.source_url ?? item.url ?? ""}`.toLowerCase();
   const brandRules: Array<[RegExp, string]> = [
     [/adidas|阿迪达斯/, "Adidas"],
     [/nike|耐克/, "Nike"],
@@ -1282,7 +1201,7 @@ function preferNonEmptyStringArray(primary: unknown, fallback: string[]): string
 
 function formatPrice(price: number | null): string {
   if (typeof price !== "number" || !Number.isFinite(price) || price <= 0) {
-    return "CNY 0";
+    return "价格以官网为准";
   }
 
   return `CNY ${price}`;

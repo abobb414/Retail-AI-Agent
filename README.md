@@ -76,8 +76,10 @@ flowchart LR
 |-- index.ts                         # Cloudflare Worker: 导入、清洗、RAG 检索、商品锁定
 |-- wrangler.jsonc                   # Worker、D1、Vectorize、Workers AI 绑定
 |-- migrations/
-|   `-- 001_expand_products_for_rag.sql
+|   |-- 001_expand_products_for_rag.sql
+|   `-- 002_catalog_facets.sql
 |-- scripts/
+|   |-- normalize-product-catalog.mjs # 从真实商品库生成结构化分类与属性
 |   |-- import-real-products.mjs      # 批量导入商品到 D1 + Vectorize
 |   |-- migrate-products-schema.mjs   # D1 表结构升级脚本
 |   `-- README.md
