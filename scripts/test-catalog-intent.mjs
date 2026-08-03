@@ -7,7 +7,8 @@ const { buildNoMatchResponse, getClarificationReply } = await import("../index.t
 
 const cases = [
   ["Lululemon男士夏季运动服", { department: "apparel", brand: "Lululemon", gender: "male" }],
-  ["Nike女士跑鞋", { department: "apparel", brand: "Nike", productType: "shoes", gender: "female" }],
+  ["Nike女士跑鞋", { department: "apparel", brand: "Nike", productType: "shoes", specificIntent: "running_shoe", gender: "female" }],
+  ["男士运动鞋预算500", { department: "apparel", productType: "shoes", specificIntent: "sports_shoe", gender: "male", budget: 500 }],
   ["三星手机预算4000", { department: "digital", brand: "Samsung", productType: "phone", budget: 4000 }],
   ["格力空调", { department: "appliance", brand: "Gree 格力", productType: "air_conditioner" }],
   ["宜家沙发", { department: "furniture", brand: "IKEA", productType: "sofa" }],
@@ -71,5 +72,12 @@ const noMatchReply = buildNoMatchResponse("三星手机男士预算4000").chat_r
 assert.equal(noMatchReply, "我查了下商品库，暂时没有找到符合Samsung、手机、男士、预算4000元以内的商品。你可以换个品牌、型号或预算，我再帮你看看。");
 assert.equal(noMatchReply.includes("性别="), false);
 assert.equal(noMatchReply.includes("不会用其他分类"), false);
+
+const nearestReply = buildNoMatchResponse("男士跑步鞋预算500", {
+  name: "Nike Free Run 5.0 Next Nature 男子透气轻盈跑步鞋",
+  price_display: "CNY 799",
+  price: 799,
+}).chat_reply;
+assert.equal(nearestReply, "我查了下商品库，500元以内暂时没有符合跑步鞋、男士的商品。最接近的是Nike Free Run 5.0 Next Nature 男子透气轻盈跑步鞋，价格为CNY 799；如果预算能提高到799元左右，我再帮你看。");
 
 console.log(`Catalog intent regression passed: ${cases.length + 1} profile cases and ${clarificationCases.length} clarification cases.`);

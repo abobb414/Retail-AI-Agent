@@ -44,6 +44,8 @@ import {
   detectRequestProfile,
   getProductTypeLabel,
   getSearchTerms,
+  getSpecificIntentLabel,
+  getSpecificIntentTerms,
   normalizeText,
   type Department,
   type Gender,
@@ -54,7 +56,16 @@ type RawProduct = {
   id: string;
   name: string;
   brand?: string;
+  category?: string;
+  source_category?: string;
   price_range?: string;
+  materials?: string;
+  craftsmanship?: string;
+  signature_specs?: string[];
+  style_tags?: string[];
+  room_tags?: string[];
+  pairing_note?: string;
+  scenarios?: string[];
   source_url?: string;
   image?: string;
   feature?: string;
@@ -249,7 +260,8 @@ async function handleChat(request: Request, env: Env): Promise<Response> {
   const products = await retrieveProductsForMessage(env, payload.message);
 
   if (products.length === 0) {
-    return jsonResponse(buildNoMatchResponse(payload.message), 200);
+    const nearestProduct = await findNearestProductForMessage(env, payload.message);
+    return jsonResponse(buildNoMatchResponse(payload.message, nearestProduct), 200);
   }
 
   return jsonResponse(buildRecommendationResponse(payload.message, products[0]), 200);
@@ -359,7 +371,16 @@ function validateRawProduct(item: unknown, index: number): RawProduct {
     id: product.id,
     name: product.name,
     brand: typeof product.brand === "string" ? product.brand : "",
+    category: typeof product.category === "string" ? product.category : "",
+    source_category: typeof product.source_category === "string" ? product.source_category : "",
     price_range: typeof product.price_range === "string" ? product.price_range : "",
+    materials: typeof product.materials === "string" ? product.materials : "",
+    craftsmanship: typeof product.craftsmanship === "string" ? product.craftsmanship : "",
+    signature_specs: normalizeStringArray(product.signature_specs),
+    style_tags: normalizeStringArray(product.style_tags),
+    room_tags: normalizeStringArray(product.room_tags),
+    pairing_note: typeof product.pairing_note === "string" ? product.pairing_note : "",
+    scenarios: normalizeStringArray(product.scenarios),
     source_url: typeof product.source_url === "string" ? product.source_url : "",
     image: typeof product.image === "string" ? product.image : "",
     feature: typeof product.feature === "string" ? product.feature : "",
@@ -382,8 +403,37 @@ function validateRawProduct(item: unknown, index: number): RawProduct {
 }
 
 function cleanProduct(item: RawProduct): CleanProduct {
-  const description = item.feature?.trim() ?? "";
   const keywords = item.keywords ?? [];
+  const signatureSpecs = item.signature_specs ?? [];
+  const styleTags = item.style_tags ?? [];
+  const roomTags = item.room_tags ?? [];
+  const scenarios = item.scenarios ?? [];
+  const descriptionParts: string[] = [];
+  const addDescriptionPart = (value: string | undefined, label = "") => {
+    const text = value?.trim();
+    if (!text || descriptionParts.some((part) => normalizeText(part) === normalizeText(text))) return;
+    descriptionParts.push(label ? `${label}: ${text}` : text);
+  };
+  const sourceCategory = item.source_category?.trim() || item.category?.trim();
+  addDescriptionPart(sourceCategory, "商品分类");
+  const normalizedSubcategory = item.subcategory?.trim();
+  addDescriptionPart(
+    normalizedSubcategory && normalizedSubcategory !== "其他" ? normalizedSubcategory : "",
+    "细分类目",
+  );
+  addDescriptionPart(item.feature, "商品特征");
+  if (normalizeText(item.craftsmanship ?? "") !== normalizeText(item.feature ?? "")) {
+    addDescriptionPart(item.craftsmanship, "工艺或系列");
+  }
+  if (normalizeText(item.materials ?? "") !== normalizeText(sourceCategory ?? "")) {
+    addDescriptionPart(item.materials, "材质/颜色/系列信息");
+  }
+  addDescriptionPart(signatureSpecs.length ? signatureSpecs.join("；") : "", "规格");
+  addDescriptionPart(styleTags.length ? styleTags.join("、") : "", "风格");
+  addDescriptionPart(roomTags.length ? roomTags.join("、") : "", "适用场景/空间");
+  addDescriptionPart(scenarios.length ? scenarios.join("、") : "", "使用场景");
+  addDescriptionPart(item.pairing_note);
+  const description = descriptionParts.join("。 ");
   const price = item.price_cny === null ? 0 : item.price_cny ?? parsePriceFromProduct(item);
   const priceDisplay = item.price_display?.trim() || (price > 0 ? `CNY ${price}` : item.price_cny === null ? "价格以官网为准" : item.price_range?.trim() ?? "价格以官网为准");
   const department = isDepartment(item.department) ? item.department : "other";
@@ -392,6 +442,7 @@ function cleanProduct(item: RawProduct): CleanProduct {
   const gender = isGender(item.gender) ? item.gender : null;
   const sizeOptions = item.size_options ?? [];
   const attributes = item.attributes ?? {};
+  const avoidFor = (item.avoid_for ?? []).filter((value) => !isGenericAvoidFor(value));
 
   return {
     id: item.id,
@@ -404,7 +455,7 @@ function cleanProduct(item: RawProduct): CleanProduct {
     description,
     image: item.image?.trim() ?? "",
     idealFor: item.ideal_for ?? [],
-    avoidFor: item.avoid_for ?? [],
+    avoidFor,
     department,
     productType,
     subcategory,
@@ -419,8 +470,8 @@ function cleanProduct(item: RawProduct): CleanProduct {
       gender ? `性别: ${gender}` : "",
       sizeOptions.length ? `可选尺寸: ${sizeOptions.join(", ")}` : "",
       Object.keys(attributes).length ? `规格属性: ${JSON.stringify(attributes)}` : "",
-      `核心特征: ${description}`,
-      `标签: ${keywords.join(", ")}`,
+      `商品描述: ${description}`,
+      keywords.length ? `搜索关键词: ${keywords.join(", ")}` : "",
     ].filter(Boolean).join("。"),
   };
 }
@@ -593,10 +644,14 @@ async function fetchProductsByVectorMatches(
 }
 
 async function retrieveProductsForMessage(env: Env, message: string): Promise<ProductContext[]> {
+  const structuredProducts = await safeProductSearch("Structured product search failed", () =>
+    fetchProductsByStructuredProfile(env, message),
+  );
   const lexicalProducts = await safeProductSearch("Lexical product search failed", () =>
     fetchProductsByLexicalSearch(env, message),
   );
-  const lexicalCandidates = rankProductsForMessage(message, selectCandidateProducts(message, lexicalProducts));
+  const initialProducts = mergeProducts(structuredProducts, lexicalProducts);
+  const lexicalCandidates = rankProductsForMessage(message, selectCandidateProducts(message, initialProducts));
 
   if (lexicalCandidates.length > 0) {
     return lexicalCandidates;
@@ -605,9 +660,46 @@ async function retrieveProductsForMessage(env: Env, message: string): Promise<Pr
   const semanticProducts = await safeProductSearch("Semantic product search failed", () =>
     fetchProductsBySemanticSearch(env, message),
   );
-  const mergedProducts = mergeProducts(lexicalProducts, semanticProducts);
+  const mergedProducts = mergeProducts(initialProducts, semanticProducts);
 
   return rankProductsForMessage(message, selectCandidateProducts(message, mergedProducts));
+}
+
+async function fetchProductsByStructuredProfile(env: Env, message: string, ignoreBudget = false): Promise<ProductContext[]> {
+  const profile = detectRequestProfile(message);
+
+  if (!profile.department || (!profile.productType && profile.budget === null && !profile.gender)) {
+    return [];
+  }
+
+  const conditions = ["department = ?"];
+  const bindings: Array<string | number> = [profile.department];
+
+  if (profile.productType) {
+    conditions.push("product_type = ?");
+    bindings.push(profile.productType);
+  }
+
+  if (profile.gender && profile.department === "apparel") {
+    conditions.push("gender IN (?, 'unisex')");
+    bindings.push(profile.gender);
+  }
+
+  if (profile.budget !== null && !ignoreBudget) {
+    conditions.push("price > 0 AND price <= ?");
+    bindings.push(profile.budget);
+  }
+
+  const result = await env.DB.prepare(
+    `SELECT id, vector_id, name, brand, price, price_display, url, description, image, ideal_for, avoid_for,
+            department, product_type, subcategory, gender, size_options, attributes
+     FROM products
+     WHERE ${conditions.join(" AND ")}`,
+  )
+    .bind(...bindings)
+    .all<ProductRow>();
+
+  return (result.results ?? []).map((row) => rowToProductContext(row, 0));
 }
 
 async function safeProductSearch(
@@ -631,6 +723,27 @@ async function safeProductSearch(
 function selectCandidateProducts(message: string, products: ProductContext[]): ProductContext[] {
   const profile = detectRequestProfile(message);
   return products.filter((product) => productMatchesRequest(product, profile));
+}
+
+async function findNearestProductForMessage(env: Env, message: string): Promise<ProductContext | null> {
+  const profile = detectRequestProfile(message);
+
+  if (profile.budget === null || !profile.department) {
+    return null;
+  }
+
+  const products = await safeProductSearch("Nearest product search failed", () =>
+    fetchProductsByStructuredProfile(env, message, true),
+  );
+  const candidates = products.filter((product) => productMatchesRequest(product, profile, true));
+
+  return candidates
+    .filter((product) => product.price > profile.budget!)
+    .sort((left, right) => {
+      const leftGenderRank = profile.gender && left.department === "apparel" && left.gender === profile.gender ? 0 : left.gender === "unisex" ? 1 : 2;
+      const rightGenderRank = profile.gender && right.department === "apparel" && right.gender === profile.gender ? 0 : right.gender === "unisex" ? 1 : 2;
+      return leftGenderRank - rightGenderRank || left.price - right.price;
+    })[0] ?? null;
 }
 
 async function fetchProductsBySemanticSearch(env: Env, message: string): Promise<ProductContext[]> {
@@ -733,9 +846,11 @@ function rowToProductContext(row: ProductRow, score: number): ProductContext {
   };
 }
 
-function productMatchesRequest(product: ProductContext, profile: RequestProfile): boolean {
+function productMatchesRequest(product: ProductContext, profile: RequestProfile, ignoreBudget = false): boolean {
   if (profile.department && product.department !== profile.department) return false;
   if (profile.productType && product.product_type !== profile.productType) return false;
+
+  if (profile.specificIntent && !productMatchesSpecificIntent(product, profile.specificIntent)) return false;
 
   if (profile.brand && !brandMatches(product.brand, profile.brand)) return false;
 
@@ -743,7 +858,7 @@ function productMatchesRequest(product: ProductContext, profile: RequestProfile)
     if (product.gender !== profile.gender && product.gender !== "unisex") return false;
   }
 
-  if (profile.budget !== null && (product.price <= 0 || product.price > profile.budget)) return false;
+  if (!ignoreBudget && profile.budget !== null && (product.price <= 0 || product.price > profile.budget)) return false;
 
   if (profile.size && product.department === "apparel") {
     if (!product.size_options.length || !product.size_options.some((size) => normalizeText(size) === normalizeText(profile.size!))) return false;
@@ -760,6 +875,21 @@ function productMatchesRequest(product: ProductContext, profile: RequestProfile)
   }
 
   return true;
+}
+
+function productMatchesSpecificIntent(product: ProductContext, intent: string) {
+  const productText = normalizeIntentText(
+    `${product.name} ${product.subcategory} ${product.description} ${JSON.stringify(product.attributes)}`,
+  );
+  return getSpecificIntentTerms(intent).some((term) => {
+    const normalizedTerm = normalizeIntentText(term);
+
+    if (intent === "running_shoe" && normalizedTerm === "跑鞋") {
+      return productText.includes("跑鞋") && !productText.includes("跑鞋风");
+    }
+
+    return productText.includes(normalizedTerm);
+  });
 }
 
 function numericAttribute(attributes: Record<string, unknown>, key: string) {
@@ -1215,22 +1345,29 @@ function cleanConsultantText(value: string): string {
     .trim();
 }
 
-export function buildNoMatchResponse(message?: string): ChatResponse {
+export function buildNoMatchResponse(message?: string, nearestProduct?: ProductContext | null): ChatResponse {
   const profile = message ? detectRequestProfile(message) : null;
-  const constraints = profile
+  const requestedDetails = profile
     ? [
         profile.brand,
-        profile.productType ? getProductTypeLabel(profile.productType) : profile.department ? DEPARTMENT_LABELS[profile.department] : null,
+        profile.specificIntent ? getSpecificIntentLabel(profile.specificIntent) : profile.productType ? getProductTypeLabel(profile.productType) : profile.department ? DEPARTMENT_LABELS[profile.department] : null,
         profile.gender ? profile.gender === "male" ? "男士" : profile.gender === "female" ? "女士" : profile.gender === "child" ? "儿童" : "中性款" : null,
         profile.size ? `尺码${profile.size}` : null,
-        profile.budget !== null ? `预算${profile.budget}元以内` : null,
         profile.screenSizeInch !== null ? `${profile.screenSizeInch}寸` : null,
         profile.storageGb !== null ? `${profile.storageGb}GB` : null,
       ].filter(Boolean).join("、")
     : "";
+  const constraints = profile
+    ? [
+        requestedDetails,
+        profile.budget !== null ? `预算${profile.budget}元以内` : null,
+      ].filter(Boolean).join("、")
+    : "";
 
   return {
-    chat_reply: constraints
+    chat_reply: nearestProduct && profile !== null && profile.budget !== null && nearestProduct.price > profile.budget
+      ? `我查了下商品库，${profile.budget}元以内暂时没有符合${requestedDetails || "这次要求"}的商品。最接近的是${nearestProduct.name}，价格为${nearestProduct.price_display}；如果预算能提高到${nearestProduct.price}元左右，我再帮你看。`
+      : constraints
       ? `我查了下商品库，暂时没有找到符合${constraints}的商品。你可以换个品牌、型号或预算，我再帮你看看。`
       : "我查了下商品库，暂时没有找到符合这次需求的商品。你可以补充其他要求，我再帮你看看。",
     recommended_product: null,
@@ -1242,6 +1379,10 @@ function normalizeStringArray(value: unknown): string[] {
   return Array.isArray(value)
     ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
     : [];
+}
+
+function isGenericAvoidFor(value: string) {
+  return /还没有确定使用场景、尺码或安装条件的人|需要线下试穿、试坐或现场测量后再决定的人/.test(value);
 }
 
 function isDepartment(value: unknown): value is Department {

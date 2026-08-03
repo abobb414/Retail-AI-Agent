@@ -18,6 +18,7 @@ export type Gender = "male" | "female" | "child" | "unisex";
 export interface RequestProfile {
   department: Department | null;
   productType: string | null;
+  specificIntent: string | null;
   brand: string | null;
   gender: Gender | null;
   budget: number | null;
@@ -64,7 +65,7 @@ const PRODUCT_TYPE_ALIASES: Array<{ type: string; department: Department; aliase
   { type: "kitchen_appliance", department: "appliance", aliases: ["烤箱", "微波炉", "咖啡机", "面包机"] },
   { type: "cleaning_appliance", department: "appliance", aliases: ["吸尘器", "扫地机", "清洁电器"] },
   { type: "personal_care", department: "appliance", aliases: ["剃须刀", "电动牙刷", "吹风机", "美容仪"] },
-  { type: "shoes", department: "apparel", aliases: ["鞋", "跑鞋", "运动鞋", "板鞋", "靴", "拖鞋"] },
+  { type: "shoes", department: "apparel", aliases: ["鞋", "跑步鞋", "跑鞋", "运动鞋", "训练鞋", "徒步鞋", "板鞋", "靴", "拖鞋"] },
   { type: "tops", department: "apparel", aliases: ["t恤", "短袖", "半袖", "衬衫", "上衣", "背心", "卫衣"] },
   { type: "pants", department: "apparel", aliases: ["裤", "裤子", "运动裤", "长裤", "短裤", "牛仔裤"] },
   { type: "outerwear", department: "apparel", aliases: ["外套", "夹克", "冲锋衣", "羽绒服", "风衣"] },
@@ -89,6 +90,19 @@ const PRODUCT_TYPE_ALIASES: Array<{ type: string; department: Department; aliase
   { type: "lamp", department: "lighting", aliases: ["灯", "台灯", "落地灯", "吊灯", "灯具", "照明", "lamp"] },
   { type: "toy", department: "toys", aliases: ["玩具", "积木", "火车轨道", "儿童玩具", "toy"] },
   { type: "exercise_equipment", department: "fitness", aliases: ["健身器材", "动感单车", "跑步机", "运动器材", "exercise bike"] },
+];
+
+const SPECIFIC_INTENT_ALIASES = [
+  { intent: "running_shoe", label: "跑步鞋", productType: "shoes", aliases: ["跑步鞋", "公路跑鞋", "跑鞋", "running shoe", "running shoes"] },
+  { intent: "trail_running_shoe", label: "越野跑鞋", productType: "shoes", aliases: ["越野跑鞋", "越野鞋", "trail shoe", "trail running"] },
+  { intent: "training_shoe", label: "训练鞋", productType: "shoes", aliases: ["训练鞋", "训练用鞋", "training shoe"] },
+  { intent: "basketball_shoe", label: "篮球鞋", productType: "shoes", aliases: ["篮球鞋", "篮球运动鞋", "basketball shoe"] },
+  { intent: "football_shoe", label: "足球鞋", productType: "shoes", aliases: ["足球鞋", "足球运动鞋", "football shoe"] },
+  { intent: "sports_shoe", label: "运动鞋", productType: "shoes", aliases: ["运动鞋", "休闲运动鞋", "运动休闲鞋", "sport shoe", "sneaker"] },
+  { intent: "slipper", label: "拖鞋", productType: "shoes", aliases: ["拖鞋", "室内拖鞋", "浴室拖鞋", "slipper"] },
+  { intent: "sandal", label: "凉鞋", productType: "shoes", aliases: ["凉鞋", "沙滩鞋", "溯溪鞋", "sandal"] },
+  { intent: "boots", label: "靴子", productType: "shoes", aliases: ["靴子", "雪地靴", "短靴", "长靴", "boots"] },
+  { intent: "formal_shoe", label: "正装鞋", productType: "shoes", aliases: ["皮鞋", "正装鞋", "乐福鞋", "loafer"] },
 ];
 
 type BrandAlias = {
@@ -150,6 +164,7 @@ export function detectRequestProfile(message: string): RequestProfile {
   return {
     department,
     productType: typeMatch?.type ?? null,
+    specificIntent: detectSpecificIntent(text, typeMatch?.type ?? null),
     brand: brandMatch?.brand ?? null,
     gender: detectGender(text),
     budget,
@@ -177,7 +192,19 @@ export function getSearchTerms(profile: RequestProfile) {
     for (const alias of [...(match?.aliases ?? []), ...(match?.matchBrands ?? [])]) terms.add(alias);
   }
   if (profile.gender) terms.add(profile.gender);
+  if (profile.specificIntent) {
+    const intent = SPECIFIC_INTENT_ALIASES.find((entry) => entry.intent === profile.specificIntent);
+    for (const alias of intent?.aliases ?? []) terms.add(alias);
+  }
   return [...terms];
+}
+
+export function getSpecificIntentLabel(intent: string | null) {
+  return SPECIFIC_INTENT_ALIASES.find((entry) => entry.intent === intent)?.label ?? null;
+}
+
+export function getSpecificIntentTerms(intent: string | null) {
+  return SPECIFIC_INTENT_ALIASES.find((entry) => entry.intent === intent)?.aliases ?? [];
 }
 
 export function brandMatches(productBrand: string, requestedBrand: string) {
@@ -200,6 +227,16 @@ function detectDepartment(text: string): Department | null {
     .sort((left, right) => right.alias.length - left.alias.length)[0];
 
   return match?.department ?? null;
+}
+
+function detectSpecificIntent(text: string, productType: string | null) {
+  if (!productType) return null;
+
+  return SPECIFIC_INTENT_ALIASES
+    .filter((entry) => entry.productType === productType)
+    .flatMap((entry) => entry.aliases.map((alias) => ({ intent: entry.intent, alias: normalizeText(alias) })))
+    .filter(({ alias }) => alias && text.includes(alias))
+    .sort((left, right) => right.alias.length - left.alias.length)[0]?.intent ?? null;
 }
 
 function detectGender(text: string): Gender | null {
