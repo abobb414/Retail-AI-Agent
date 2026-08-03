@@ -29,6 +29,20 @@
 - Cloudflare Worker 已发布到 [retail-ai-agent-worker.abobb-retail-ai-agent.workers.dev](https://retail-ai-agent-worker.abobb-retail-ai-agent.workers.dev)。
 - Nuxt 前端已发布到 [retail.abobb.site](https://retail.abobb.site)，并完成 `/api/chat` 代理端到端验证。
 
+## [2026-08-03] — 全分类意图覆盖补全
+
+### 修复
+
+- 补齐商品库实际品牌识别：Lululemon、The North Face、全友、格力、博世、松下、LG、GE Appliances、奥克斯、Breville 等不再因为缺少手写别名而退回一级分类询问。
+- 补齐服饰、数码、电器、家具、家居用品、个护美妆、食品饮料、宠物用品、母婴用品、文具办公、照明灯具、玩具和运动健身的自然语言分类词。
+- “Lululemon 的男士夏季运动服”现在识别为服饰 + Lululemon + 男士，只追问预算，不再要求重新选择大类。
+- 品牌匹配支持一个用户品牌对应多个商品库品牌值，例如“三星”可以匹配 `Samsung` 和 `Samsung US`。
+
+### 验证
+
+- 新增 15 条分类意图回归用例，覆盖全部一级分类、品牌、性别和无单位预算场景。
+- 线上 Worker 已完成 13 个一级分类请求回归，版本 `75aa00ef-85fb-411e-92fa-457ce3856f35`。
+
 ## [2026-07-01] — README 专业化 + PRD 独立成文
 
 ### 新增

@@ -82,6 +82,7 @@ function normalizeProduct(product) {
 
   return {
     id: stringValue(product.id),
+    brand: stringValue(product.brand),
     department,
     product_type: productType,
     subcategory: getNormalizedSubcategory(productType, sourceSubcategory, sourceCategory),

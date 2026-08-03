@@ -91,15 +91,50 @@ const PRODUCT_TYPE_ALIASES: Array<{ type: string; department: Department; aliase
   { type: "exercise_equipment", department: "fitness", aliases: ["健身器材", "动感单车", "跑步机", "运动器材", "exercise bike"] },
 ];
 
-const BRAND_ALIASES: Array<{ brand: string; aliases: string[] }> = [
+type BrandAlias = {
+  brand: string;
+  aliases: string[];
+  matchBrands?: string[];
+};
+
+// These are the brands present in the real catalog. Keep aliases broad enough
+// for user language while matching the exact brand values stored in D1.
+const BRAND_ALIASES: BrandAlias[] = [
   { brand: "Adidas", aliases: ["adidas", "阿迪达斯"] },
   { brand: "Nike", aliases: ["nike", "耐克"] },
+  { brand: "Lululemon", aliases: ["lululemon", "露露乐蒙", "露露乐梦", "露露乐"] },
   { brand: "Uniqlo", aliases: ["uniqlo", "优衣库"] },
-  { brand: "MUJI", aliases: ["muji", "无印良品"] },
+  { brand: "MUJI", aliases: ["muji", "无印良品", "无印"] },
   { brand: "IKEA", aliases: ["ikea", "宜家"] },
   { brand: "Xiaomi", aliases: ["xiaomi", "小米", "米家", "redmi", "红米"] },
-  { brand: "Samsung", aliases: ["samsung", "三星"] },
+  { brand: "Samsung", aliases: ["samsung", "三星"], matchBrands: ["Samsung", "Samsung US"] },
   { brand: "Apple", aliases: ["apple", "苹果"] },
+  { brand: "QuanU 全友", aliases: ["quanu", "全友"] },
+  { brand: "The North Face", aliases: ["the north face", "tnf", "北面"] },
+  { brand: "Gree 格力", aliases: ["gree", "格力"], matchBrands: ["Gree 格力", "Gree"] },
+  { brand: "Bosch", aliases: ["bosch", "博世"] },
+  { brand: "Panasonic", aliases: ["panasonic", "松下"] },
+  { brand: "GE Appliances", aliases: ["ge appliances", "ge", "通用电气"] },
+  { brand: "LG", aliases: ["lg", "乐金"] },
+  { brand: "Thuma", aliases: ["thuma"] },
+  { brand: "AUX", aliases: ["aux", "奥克斯"] },
+  { brand: "Breville", aliases: ["breville", "铂富"] },
+];
+
+const DEPARTMENT_ALIASES: Array<{ department: Department; aliases: string[] }> = [
+  { department: "apparel", aliases: ["服饰", "服装", "衣服", "衣物", "穿搭", "运动服", "运动服饰", "运动装", "户外服", "户外服饰", "健身服", "瑜伽服", "训练服"] },
+  { department: "digital", aliases: ["数码", "数码产品", "电子产品", "3c", "手机数码", "智能设备"] },
+  { department: "appliance", aliases: ["电器", "家电", "家用电器", "厨房电器", "清洁电器", "个人护理电器"] },
+  { department: "furniture", aliases: ["家具", "家装家具", "家居家具", "办公家具"] },
+  { department: "home_goods", aliases: ["家居用品", "家居", "餐厨用品", "餐厨", "床品", "家居装饰", "收纳用品"] },
+  { department: "personal_care", aliases: ["个护", "个护美妆", "个人护理", "美妆", "洗护", "护肤品"] },
+  { department: "food", aliases: ["食品", "食品饮料", "零食", "饮料", "茶饮", "咖啡豆", "咖啡"] },
+  { department: "pet", aliases: ["宠物用品", "宠物食品", "宠物", "猫粮", "狗粮"] },
+  { department: "baby", aliases: ["母婴用品", "母婴", "婴儿用品", "婴童用品", "宝宝用品"] },
+  { department: "stationery", aliases: ["文具办公", "办公用品", "文具", "办公"] },
+  { department: "lighting", aliases: ["照明灯具", "照明", "灯具", "灯光"] },
+  { department: "toys", aliases: ["玩具", "儿童玩具", "益智玩具"] },
+  { department: "fitness", aliases: ["运动健身", "健身器材", "运动器材", "健身设备"] },
 ];
 
 export function detectRequestProfile(message: string): RequestProfile {
@@ -139,10 +174,19 @@ export function getSearchTerms(profile: RequestProfile) {
   }
   if (profile.brand) {
     const match = BRAND_ALIASES.find((entry) => entry.brand === profile.brand);
-    for (const alias of match?.aliases ?? []) terms.add(alias);
+    for (const alias of [...(match?.aliases ?? []), ...(match?.matchBrands ?? [])]) terms.add(alias);
   }
   if (profile.gender) terms.add(profile.gender);
   return [...terms];
+}
+
+export function brandMatches(productBrand: string, requestedBrand: string) {
+  const requested = BRAND_ALIASES.find((entry) => entry.brand === requestedBrand);
+  if (!requested) return normalizeText(productBrand) === normalizeText(requestedBrand);
+
+  return [requested.brand, ...(requested.matchBrands ?? [])].some(
+    (brand) => normalizeText(productBrand) === normalizeText(brand),
+  );
 }
 
 export function normalizeText(value: string) {
@@ -150,21 +194,12 @@ export function normalizeText(value: string) {
 }
 
 function detectDepartment(text: string): Department | null {
-  if (text.includes("服饰") || text.includes("服装") || text.includes("穿")) return "apparel";
-  if (text.includes("数码") || text.includes("电子产品")) return "digital";
-  if (text.includes("电器") || text.includes("家电")) return "appliance";
-  if (text.includes("家具")) return "furniture";
-  if (text.includes("家居用品") || text.includes("家居")) return "home_goods";
-  if (text.includes("餐具") || text.includes("厨具") || text.includes("香薰") || text.includes("蜡烛") || text.includes("床品")) return "home_goods";
-  if (text.includes("护肤") || text.includes("美妆") || text.includes("洗发") || text.includes("沐浴") || text.includes("洁面")) return "personal_care";
-  if (text.includes("零食") || text.includes("食品") || text.includes("咖啡") || text.includes("茶") || text.includes("饮料")) return "food";
-  if (text.includes("宠物") || text.includes("猫粮") || text.includes("狗粮")) return "pet";
-  if (text.includes("婴儿") || text.includes("婴童") || text.includes("母婴") || text.includes("宝宝")) return "baby";
-  if (text.includes("文具") || text.includes("笔袋") || text.includes("文件夹")) return "stationery";
-  if (text.includes("灯") || text.includes("照明") || text.includes("lamp")) return "lighting";
-  if (text.includes("玩具") || text.includes("积木") || text.includes("火车轨道")) return "toys";
-  if (text.includes("健身器材") || text.includes("动感单车") || text.includes("跑步机")) return "fitness";
-  return null;
+  const match = DEPARTMENT_ALIASES
+    .flatMap((entry) => entry.aliases.map((alias) => ({ department: entry.department, alias: normalizeText(alias) })))
+    .filter(({ alias }) => alias && text.includes(alias))
+    .sort((left, right) => right.alias.length - left.alias.length)[0];
+
+  return match?.department ?? null;
 }
 
 function detectGender(text: string): Gender | null {

@@ -30,3 +30,9 @@ WORKER_URL=https://your-worker.your-subdomain.workers.dev \
 LIMIT=1 \
 node scripts/import-real-products.mjs
 ```
+
+Catalog intent regression test:
+
+```bash
+node --experimental-strip-types scripts/test-catalog-intent.mjs
+```

@@ -40,6 +40,7 @@ export interface Env {
 
 import {
   DEPARTMENT_LABELS,
+  brandMatches,
   detectRequestProfile,
   getProductTypeLabel,
   getSearchTerms,
@@ -736,7 +737,7 @@ function productMatchesRequest(product: ProductContext, profile: RequestProfile)
   if (profile.department && product.department !== profile.department) return false;
   if (profile.productType && product.product_type !== profile.productType) return false;
 
-  if (profile.brand && normalizeText(product.brand) !== normalizeText(profile.brand)) return false;
+  if (profile.brand && !brandMatches(product.brand, profile.brand)) return false;
 
   if (profile.gender && product.department === "apparel") {
     if (product.gender !== profile.gender && product.gender !== "unisex") return false;
@@ -846,7 +847,7 @@ function scoreProductForMessage(
 
   if (profile.department === product.department) score += 40;
   if (profile.productType === product.product_type) score += 80;
-  if (profile.brand && normalizeText(product.brand) === normalizeText(profile.brand)) score += 35;
+  if (profile.brand && brandMatches(product.brand, profile.brand)) score += 35;
   if (profile.gender && product.gender === profile.gender) score += 24;
   if (profile.budget !== null && product.price > 0) score += product.price <= profile.budget ? 18 : -80;
 
@@ -864,7 +865,7 @@ function getClarificationReply(message: string): string | null {
   if (!profile.department) return null;
 
   const missing: string[] = [];
-  if (!profile.productType) {
+  if (!profile.productType && !(profile.department === "apparel" && hasBroadApparelRequest(message))) {
     missing.push(getDepartmentTypePrompt(profile.department));
   }
 
@@ -939,6 +940,10 @@ function getClarificationReply(message: string): string | null {
 
 function isRecommendationRequest(text: string) {
   return /推荐|想买|想找|想看|有没有|买|选|需要|预算|商品|产品|查一下|看看/.test(text);
+}
+
+function hasBroadApparelRequest(message: string) {
+  return /运动服|运动服饰|运动装|户外服|户外服饰|健身服|瑜伽服|训练服|穿搭/.test(normalizeIntentText(message));
 }
 
 function getDepartmentTypePrompt(department: Department): string {
