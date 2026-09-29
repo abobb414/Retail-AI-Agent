@@ -3,6 +3,11 @@ export interface Recommendation {
   brand: string
   category: string
   image: string
+  /**
+   * 图片类型。空串 = 普通商品图（铺满裁切）；
+   * `'logo'` = 品牌官方标兜底（居中等比缩放，不能裁也不能铺满）。
+   */
+  image_kind?: string
   price_range: string
   budget_tier: string
   consultant_summary: string

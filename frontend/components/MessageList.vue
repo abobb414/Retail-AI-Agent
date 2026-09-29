@@ -10,20 +10,15 @@
         :class="message.role === 'user' ? 'flex-row-reverse' : ''"
       >
         <div
-          class="mt-1 flex h-10 w-10 shrink-0 items-center justify-center"
+          class="mt-1 flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full"
           :class="message.role === 'assistant' ? 'ai-avatar' : 'user-avatar'"
         >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 24 24"
-            fill="none"
-            :class="message.role === 'assistant' ? 'avatar-icon avatar-icon-ai' : 'avatar-icon avatar-icon-user'"
-            aria-hidden="true"
-          >
-            <circle cx="12" cy="8" r="3.2" />
-            <path d="M6.8 18.2C7.5 15.8 9.5 14.4 12 14.4C14.5 14.4 16.5 15.8 17.2 18.2" />
-          </svg>
-          <span class="sr-only">{{ message.role === 'assistant' ? '顾问头像' : '用户头像' }}</span>
+          <span
+            class="avatar-glyph"
+            :class="message.role === 'assistant' ? 'avatar-glyph-ai' : 'avatar-glyph-user'"
+            role="img"
+            :aria-label="message.role === 'assistant' ? '顾问头像' : '用户头像'"
+          />
         </div>
 
         <div
@@ -34,14 +29,16 @@
           ]"
         >
           <div
-            class="message-bubble rounded-[24px] px-4 py-3 text-[15px] font-normal leading-7 shadow-[0_16px_36px_rgba(140,156,176,0.12)]"
+            class="message-bubble ui-body rounded-[24px] px-4 py-3 shadow-[0_16px_36px_rgba(140,156,176,0.12)]"
             :class="message.role === 'assistant' ? 'assistant-bubble text-slate-700' : 'user-bubble text-slate-700'"
           >
             <MessageText v-if="message.content" :content="message.content" />
-            <span v-else-if="message.isStreaming" class="streaming-dots" aria-label="顾问正在回复">
-              <span />
-              <span />
-              <span />
+            <span v-else-if="message.isStreaming" class="streaming-row">
+              <span class="streaming-dots" aria-label="顾问正在回复">
+                <span />
+                <span />
+                <span />
+              </span>
             </span>
           </div>
           <RecommendationCard v-if="message.recommendation" :recommendation="message.recommendation" />
@@ -201,20 +198,42 @@ onMounted(scrollToBottom)
   box-shadow: 0 10px 26px rgba(148, 163, 184, 0.14);
 }
 
-.avatar-icon {
-  height: 18px;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 1.8;
-  width: 18px;
+/* 头像：单色线稿走 CSS mask，颜色由 CSS 给（不把黑色原封不动贴上去） */
+.avatar-glyph {
+  background-color: currentColor;
+  display: block;
+  height: 34px;
+  width: 34px;
+  -webkit-mask-image: var(--avatar-mask);
+  mask-image: var(--avatar-mask);
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+  mask-size: contain;
 }
 
-.avatar-icon-ai {
-  stroke: rgba(5, 150, 105, 0.9);
+/* 顾问（AI）：品牌绿 —— 沿用改造前内联 SVG 的墨色 #059669 */
+.avatar-glyph-ai {
+  --avatar-mask: url('/avatar-bot.svg');
+  color: #059669;
+  /* 机器人是「宽而扁 + 内部细节多」的形，同样 34px 下比用户的人形读起来轻，
+     所以单独放大一档做光学配平（36/40 仍留有安全边距） */
+  height: 36px;
+  width: 36px;
 }
 
-.avatar-icon-user {
-  stroke: rgba(71, 85, 105, 0.9);
+/* 用户：中性石板灰 —— 沿用改造前内联 SVG 的墨色 #475569 */
+.avatar-glyph-user {
+  --avatar-mask: url('/avatar-user.svg');
+  color: #475569;
+}
+
+.streaming-row {
+  align-items: center;
+  display: inline-flex;
+  gap: 0.5rem;
 }
 
 .streaming-dots {

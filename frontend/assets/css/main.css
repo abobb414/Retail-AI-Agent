@@ -1,12 +1,38 @@
 :root {
   color-scheme: light;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", sans-serif;
   --page-mint: #eef8f2;
   --page-ivory: #fbf7f1;
   --page-fog: #f8fbfd;
   --ink-main: #172033;
   --ink-soft: #5b667a;
   color: #0f172a;
+}
+
+/* 全站固定五档字号，避免同一层级在组件之间漂移。 */
+.ui-label {
+  font-size: 0.6875rem;
+  line-height: 1.45;
+}
+
+.ui-meta {
+  font-size: 0.8125rem;
+  line-height: 1.55;
+}
+
+.ui-body {
+  font-size: 0.9375rem;
+  line-height: 1.8;
+}
+
+.ui-title {
+  font-size: 1.0625rem;
+  line-height: 1.5;
+}
+
+.ui-display {
+  font-size: 1.5rem;
+  line-height: 1.25;
 }
 
 html,

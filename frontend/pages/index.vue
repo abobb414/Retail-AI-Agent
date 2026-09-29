@@ -13,7 +13,7 @@
           <button
             v-if="messages.length > 1"
             type="button"
-            class="new-chat-button inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium text-slate-500 transition hover:-translate-y-0.5 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+            class="new-chat-button ui-meta inline-flex items-center gap-2 rounded-full px-4 py-2 font-medium text-slate-500 transition hover:-translate-y-0.5 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
             :disabled="isStreaming"
             @click="resetChat"
           >
@@ -23,18 +23,11 @@
             </svg>
             <span>新会话</span>
           </button>
-          <span
-            class="status-pill rounded-full border px-4 py-2 text-sm font-medium"
-            :class="demoMode ? 'border-amber-200/80 bg-amber-50/80 text-amber-700' : 'border-emerald-200/80 bg-emerald-50/70 text-emerald-700'"
-          >
-            {{ demoMode ? '本地演示模式' : '模型在线模式' }}
-          </span>
         </div>
       </header>
 
-      <div class="grid min-h-0 flex-1 overflow-hidden lg:grid-cols-[minmax(0,1.22fr)_minmax(280px,0.78fr)] entrance-body">
+      <div class="flex min-h-0 flex-1 flex-col overflow-hidden entrance-body">
         <MessageList :messages="messages" />
-        <StatusPanel class="hidden lg:flex entrance-sidebar" :active-recommendation="activeRecommendation" :profile-summary="profileSummary" />
       </div>
 
       <footer class="shell-footer px-4 py-4 sm:px-6 sm:py-6 entrance-footer">
@@ -44,7 +37,7 @@
               v-for="(prompt, i) in quickPrompts"
               :key="prompt"
               type="button"
-              class="quick-prompt rounded-full border border-white/70 bg-white/65 px-4 py-2 text-sm font-medium text-slate-500 shadow-[0_12px_28px_rgba(130,145,160,0.10)] transition hover:-translate-y-0.5 hover:bg-white/82 hover:text-slate-600 disabled:cursor-not-allowed disabled:opacity-50 entrance-prompt"
+              class="quick-prompt ui-meta rounded-full border border-white/70 bg-white/65 px-4 py-2 font-medium text-slate-500 shadow-[0_12px_28px_rgba(130,145,160,0.10)] transition hover:-translate-y-0.5 hover:bg-white/82 hover:text-slate-600 disabled:cursor-not-allowed disabled:opacity-50 entrance-prompt"
               :class="{ 'entrance-prompt-visible': entranceActive }"
               :style="{ '--prompt-delay': `${0.34 + i * 0.06}s` }"
               :disabled="isStreaming"
@@ -69,11 +62,9 @@
 <script setup lang="ts">
 const {
   activeRecommendation,
-  demoMode,
   draft,
   isStreaming,
   messages,
-  profileSummary,
   quickPrompts,
   resetChat,
   sendMessage,
@@ -138,15 +129,6 @@ onMounted(() => {
     gap: 0.34rem;
     letter-spacing: 0.08em;
   }
-
-  .status-pill {
-    font-size: 0.75rem;
-    padding: 0.45rem 0.75rem;
-  }
-}
-
-.status-pill {
-  box-shadow: 0 16px 32px rgba(155, 170, 188, 0.12);
 }
 
 .quick-prompt {
@@ -173,11 +155,6 @@ onMounted(() => {
 .entrance .entrance-body {
   opacity: 0;
   animation: entrance-fade 0.4s ease 0.18s both;
-}
-
-.entrance .entrance-sidebar {
-  opacity: 0;
-  animation: entrance-sidebar 0.42s cubic-bezier(0.22, 1, 0.36, 1) 0.26s both;
 }
 
 .entrance .entrance-footer {
@@ -230,17 +207,6 @@ onMounted(() => {
   }
   to {
     opacity: 1;
-  }
-}
-
-@keyframes entrance-sidebar {
-  from {
-    opacity: 0;
-    transform: translateX(16px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
   }
 }
 

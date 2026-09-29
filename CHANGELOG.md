@@ -2,6 +2,428 @@
 
 本文档记录 `Retail-AI-Agent` 的重要迭代。
 
+## [2026-09-29 · 晚间] — 界面收敛：等待态只留三个点 + 移除服务来源徽章 + 全站字号统一
+
+用户原话（本次唯一需求来源）：
+
+> 正在核对你的需求，有必要就联网查一下，这句没必要说，只留前面那三个会动的点就好了，
+> 还有大模型定品那个按钮去掉，给人家展示这些相当于裸奔。最后把字体样式统一成几种格式，不要千奇百怪的
+
+### 1. 等待态只留三个动点
+
+- 后端 `meta pending` 事件不再携带 `hint` 文案（删除 `hasSearchProvider` 分支文案），前端删除 `pendingHint` 全链路状态（`useChat.ts` / `MessageList.vue`）。
+- 等待气泡 = 纯三点动画（`streaming-dots`），SSE 协议字段 `pending: true` / `stage: 'thinking'` 保持不变。
+
+### 2. 移除「大模型定品 / 商品库兜底」服务来源徽章
+
+- 删除首页头部 `status-pill` 及 `statusBadge` 计算属性、「本地演示模式」徽章。
+- SSE 里的 `engine` / `fallback_reason` / `searched` 字段**保留**，仅供内部状态与故障排查；前端不再消费与渲染。
+- 兜底链路本身（Worker + D1 + Vectorize）不受影响。
+
+### 3. 字号收敛为全局五档令牌
+
+`main.css` 定义 `ui-label`(11px) / `ui-meta`(13px) / `ui-body`(15px) / `ui-title`(17px) / `ui-display`(24px)，
+替换全部零散字号类（`text-[11px]/[15px]`、`text-xs/sm/base/lg/xl/2xl`）。品牌 wordmark 保持独立样式。
+
+### 验证
+
+- **回归测试**：离线单测全绿（品牌标域名候选 9/9、图片型号词元全套）；首页 200；等待文案/来源徽章在 SSR 壳中出现 0 次。
+- **系统测试**（新增 `scripts/system-test.mjs`，7 场景 30 断言）：首选实例 30/30（定品 Redmi Buds 5 Pro ¥299）；故障注入实例（LLM 不可达）兜底模式 30/30（engine=catalog，Xiaomi 耳夹式耳机）。
+- Vite client/server + Nitro 干净构建通过；`git diff --check` 无空白问题；grep 确认零散字号类与 `pendingHint`/`statusBadge`/`servedBy` 引用清零。
+
+## [2026-09-29 · 深夜] — 不再死磕官网商品图：品牌标兜底 + 保住官网按钮 + 只留 e-flowcode + 提速
+
+用户原话（本次唯一需求来源）：
+
+> 你别死磕了，官网图片弄不下来 url 咱们就把图片放一个官方标也可以啊，去找官方 logo 放上去，，
+> 最后跳转到官方按钮你也得给我保留啊，别去掉。api 只留 e-flowcode，速度一定要快点
+
+拆成四件事，逐条落地。
+
+### 1. 不再死磕官网商品图 ⇒ 拿不到商品图就用**品牌官方标**（新增 `server/utils/brandLogo.ts`）
+
+冷门/长尾品牌的典型困境是「官网不给 `og:image` + 官方域检索也召回不到」，以前这类直接无图。
+新增一级兜底：**官方域 favicon**，卡片以「标识 + 型号」呈现。
+
+| 决策 | 依据 |
+| --- | --- |
+| 域名候选按优先级排：来源页 host → 可注册域 → `www.` 变体 → 品牌词元拼 `.com/.cn/.com.cn`（上限 6 个） | 来源页 host 命中率最高；品牌词元拼域是最后手段 |
+| 路径优先 `/apple-touch-icon.png`（通常 180×180），退回 `/favicon.ico` | 实测 apple-touch-icon 分辨率显著更好 |
+| **并发探测**，再按「域名顺序 → 是否 apple-touch-icon → 尺寸更大」排序 | 串行探测 6 域 × 2 路径 = 12 次串行，纯浪费 |
+| **与整条找图链路并行发起**，只在最后没图时才 `await` | 探测本身最坏 2s；并行后此时结果早已回来 ⇒ **对总耗时零影响**。这是「加功能不加延迟」的关键 |
+
+踩过的三个坑：
+
+1. **`logo.clearbit.com` 已死**、`icons.duckduckgo.com` 解析不了 `.com.cn` ⇒ 只能自己探官方域。
+2. **不能用字节数当分辨率判据**。`timemore.cn` 的 473 字节图标是合法的 16×16，而 3KB 的 ICO 也可能还是 16×16。
+   改成**真解析像素**，阈值 `MIN_LOGO_SIDE = 32`。
+3. **ICO 是容器，必须遍历所有目录项取最大边**。只读第 1 项会把好标误杀 —— Nikon 那个文件同时装了
+   `16x16` 和 `32x32`，只看第 1 项 ⇒ 误判为「太小」而丢弃。
+
+顺带发现两个「返回 200 但不是图」的假阳性，所以必须先做 **magic number 嗅探**：
+`moondroplab.com/favicon.ico` 返回 **200 + text/html**，`logitechg.com/favicon.ico` 里装的其实是 PNG。
+
+实测命中率 **4/8**（Logitech 1.2s、Ergotron 0.6s、Casio 1.0s、Nikon 0.3s）。
+
+#### 🔴 自测抓到的 bug：第三方站的 favicon 冒充「品牌官方标」
+
+跑批汇总一度显示「有图 7/8，品牌标兜底 4」——看着很成功，但**逐条看明细才发现图床不对**：
+
+```
+【游戏方向盘】莱仕达 PXN     图=smzdm.com(标)
+【显示器支架】北弧 E350      图=www.jd.com(标)
+【有线入耳耳机】兴戈 EA500LM  图=zhuanlan.zhihu.com(标)
+```
+
+根因在 `candidateDomains`：它把 `source_url` 的主机**无条件排在第 1 位**，注释还写着
+「它已经过了『官方域』核验，是最可信的」—— **那句话在这里是错的**。logo 探测是为了零延迟
+才在 `verifyProductSource` **之前**并行发起的，而那一刻 `product.source_url` 还是模型给的原始地址，
+经常是第三方页。于是什么值得买 / 京东 / 知乎的 favicon 被当成「品牌官方标」贴上了商品卡。
+
+用户要的是**官方 logo**；把第三方站点的标当商品封面会让人误以为有背书关系 —— **比没有图更糟**。
+修法是用 `isBrandOfficialHost` 过一道门槛，非官方域直接不进候选，探不到就老实返回 `null`
+（前端显示文字占位）。同时把「官方候选页」的主机也喂进候选（仍是并发、仍是最后才 await，零额外等待），
+把命中面从「brand 词元猜的域」扩到「检索已证明是官方域的站点」，例如 PXN 的 `e-pxn.com.cn`。
+
+修后跑批：`定品 7/8  有图 5/7（真实商品图 3 + 官方标 2）  官网按钮 7/7  平均 39.2s`。
+**「有图数」下降是修正而不是回归** —— 少掉的那两张本来就是错的。
+
+> 教训（已写进代码注释）：**并行优化会让「某字段已经过校验」这类时序假设失效。**
+> 注释里的前提必须跟着代码的执行顺序一起复查，否则一个「变快」的改动会静默地让语义变错。
+
+新增 `scripts/test-brand-logo.mjs`（9 例，纯离线）把这条规则钉死 —— 因为这种 bug 在跑批输出里
+**只体现为「图床是第三方域」，极易被读成噪声**：
+
+```bash
+node --experimental-strip-types scripts/test-brand-logo.mjs
+# ✅ 第三方来源页不许进候选（PXN ← smzdm）  →  ["pxn.com","www.pxn.com",...]
+# ✅ 官方来源页要保留，且补出主站与 www 变体（德生）  →  ["m.tecsun.com.cn","tecsun.com.cn",...]
+# ✅ 品牌标域名候选 全部通过（9 例；其中 16 类第三方域已确认被拦）
+```
+
+现在这一级是**正确性优先**：两个跑批里剩下的 `none`（德生 `tecsun.com.cn`、松能 `humanmotion.com`）
+都实测过确实连不上（curl `status 0`），不是被闸门误杀。而 `www.brateck.com/favicon.ico`（64×64 ICO）
+与 `e-pxn.com.cn/favicon.ico`（1.4KB，内里是 61×61 PNG）都确认可用且能过 32px 闸门。
+
+另外把质检里**白得**的官方标也接上了：质检时若某张图判为「纯标识」且位于品牌官方域，
+就顺手收下（官网 `og:image` 经常就是它，分辨率比 favicon 高得多）。
+又补了最后一档：官方域上「被判 `not_product_shot` 且无水印」的图
+（实测 Casio 那张的理由就写着「整张图仅有 CASIO 品牌文字标识，没有出现商品本体」）——
+它当封面不合格，但**恰好就是用户要的官方标**，而且已经在质检里看过一次，识别成本为零。
+
+前端配套（`RecommendationCard.vue`）：新增 `image_kind === 'logo'` 分档，标识用
+`max-h-14 max-w-[55%] object-contain` + 浅色渐变底居中呈现；商品图才铺满裁切。
+不做这个区分的话，一张方 logo 被 `cover` 裁掉两边会很难看。
+
+### 2. 「跳转到官方」按钮不能丢 ⇒ 链接**永不清空**
+
+这条是本次最隐蔽的回归。核验来源页的原逻辑是：
+
+| 情况 | 原处理 |
+| --- | --- |
+| 404 / 不可达 | **`source_url` 与图片一起清掉** |
+| 重定向后无图 | **链接也不认** |
+
+在「只有图片一个消费方」时看着合理，但前端按钮是 `v-if="source_url"` ⇒ **清空链接 = 按钮整块消失**。
+实测那批冷门用例的官网按钮命中率因此掉到接近 0，而用户明确要求「你也得给我保留啊，别去掉」。
+
+修法是把两件事**解耦**：核验只决定「用不用这张图」，不决定「给不给这个入口」。
+链接的可信度问题改由「有官方页时就替换掉」处理，而不是靠删除入口。
+再加一层兜底：模型完全没给出可用来源时，退而用事先算好的**官方域候选页**填上。
+
+结果：**官网按钮 8/8**（此前接近 0），修改后连续两轮跑批均为 8/8。
+
+### 3. api 只留 e-flowcode ⇒ 砍掉备用大模型
+
+`chat.post.ts` 原有三条出口：买手大模型（e-flowcode）→ 备用大模型（`LLM_FALLBACK_*`）→
+商品库链路（Cloudflare Worker + D1 + Vectorize）。
+
+**只砍备用大模型是对的，砍商品库兜底是错的。** 用户原话「api 只留 e-flowcode」指的是
+**买手大模型的供应商**只留一个，我把它过度理解成「整条兜底链路也一并摘掉」，
+顺手删了 Worker 商品库兜底 —— 那是防大模型崩溃的后路，删不得（已原样恢复，见 3.1）。
+
+两者性质完全不同，不能合并处理：
+
+| | 备用大模型 `LLM_FALLBACK_*` | 商品库兜底 Worker + D1 + Vectorize |
+| --- | --- | --- |
+| 换的是什么 | 同一个出口换个模型 | 换**一整套数据源** |
+| 依赖大模型吗 | 依赖（同一个中转站） | **完全不依赖** |
+| 中转站挂了 | 一起挂（抖动是链路级的，实测三台主机同时 `fetch failed`） | **照样出卡片** |
+| 定位 | 冗余，可砍 | 可用性保险，不可砍 |
+
+所以真正移除的只有备用大模型：
+
+- 删除 `llmFallbackApiKey` / `llmFallbackBaseUrl` / `llmFallbackModel`
+  （`nuxt.config.ts` / `.env` / `.env.example`）
+
+### 3.1 ⚠️ 更正：商品库兜底删了又恢复（同日）
+
+删掉后用户立刻发现并质问：「你为啥把我的兜底 Worker + D1 + Vectorize 删掉？
+这就是我为了防止大模型崩溃准备的后路啊」。全部原样恢复：
+
+- `chat.post.ts`：`type Engine = 'llm' | 'catalog'`；恢复 `WorkerRecommendedProduct` /
+  `WorkerChatResponse` / `buildWorkerMessage` / `isStandaloneProductRequest` / `normalizeIntentText` /
+  `cleanCopyText` / `toRecommendation` / `parseWorkerError` / `postWorkerChat` /
+  `postWorkerChatWithResolvedIp` / `import https`；新增 `runCatalogFallback()` 作为第二级
+- `nuxt.config.ts` / `.env` / `.env.example`：恢复 `workerChatUrl` / `workerResolveIp`
+- 前端**一行都没改** —— `useChat.ts` 的 `engine === 'catalog'` 分支和 `index.vue` 的展示本来就还在，
+  是我单方面把后端删了，让那条分支变成永远走不到的死代码
+
+**故障注入实测**（把 `LLM_BASE_URL` 指到必然连不上的地址，不碰 `.env`）：
+
+```
+event: meta    {"engine":"llm","stage":"thinking","hint":"正在核对你的需求，有必要就联网查一下…"}
+event: meta    {"engine":"llm","stage":"thinking","hint":"大模型这会儿不稳，正在从在售商品库里找…"}
+event: chunk   {"text":"这款 AIRism棉混纺圆领T恤/短袖 更贴近你刚才补充的条件…"}
+event: product {"brand":"UNIQLO","price_range":"CNY 79",
+                "image":"https://www.uniqlo.cn/hmall/test/u0000000069452/main/first/561/1.jpg",
+                "source_url":"https://www.uniqlo.cn/product-detail.html?productCode=u0000000069452"}
+event: meta    {"mode":"cloudflare_worker","engine":"catalog","stage":"rag_recommendation"}
+event: done    {"source":"catalog_fallback"}
+```
+
+服务端日志：
+
+```
+WARN [llmBuyer] 检索降级： fetch failed
+WARN [chat] 买手大模型定品失败： 大模型定品失败：fetch failed
+WARN [chat] 买手大模型定品失败，降级商品库兜底： 大模型定品失败：fetch failed
+```
+
+兜底链路**不依赖任何大模型**，而且快：直连 Worker 端点 `POST /api/chat` 实测 **0.6s**，
+给出的是 D1 里人工核过的真实商品（UNIQLO T恤 ¥79、IKEA 灯 ¥99.99），**带图、带官网链接**。
+
+**顺手加的两处体验**：
+
+1. 降级时先推一条 `pending` 提示「大模型这会儿不稳，正在从在售商品库里找…」，
+   不让用户对着转圈的 thinking 气泡猜（且只在真的配了兜底时才说，不给兑现不了的承诺）。
+2. 两条链路都失败时，报错文案**分别给出各自的原因**，而不是一句笼统的「失败了」。
+
+**可优化的地方（留档）**：目前是「首选失败 → 才走兜底」的串行降级，所以最坏情况是
+`LLM_TIMEOUT_MS`（40s）跑满再叠加兜底时间。正常路径上兜底连碰都不会碰，零额外延迟；
+若要把最坏情况也压下来，可改成 hedged request（首选发出 8s 未回就并行发起兜底，谁先成功用谁）。
+本轮没做，因为它需要把 `runLlmPrimary` 改成「返回结果、由外层统一写 SSE 事件」才能并行，
+改动面较大，先留为后续优化。
+
+### 4. 速度：把「判定失败」的样本从延迟链上摘掉
+
+用户要求「速度一定要快点」。这一轮先量后改，找到的**真正大头不是网络，是单张图质检的超时值**。
+
+日志铁证（改前）：
+
+```
+{"judgeCalls":6,"judgeMs":58934, ...}                                  ← 单个用例质检累计 58.9s
+{"judgeMs":25005,"note":"判定请求失败：This operation was aborted"}     ← 连出现 3 次
+```
+
+**根因**：同一批候选是**并行**判定的，批次墙钟 = 最慢的那一张；而**失败**的那张一定会顶满上限。
+也就是说 `IMAGE_JUDGE_TIMEOUT_MS` 这个值主要作用在**失败样本**上 —— 设 25s，
+一个判不出来的图就把整批一起拖住 25s。
+
+| 改动 | 从 → 到 | 依据 |
+| --- | --- | --- |
+| `IMAGE_JUDGE_TIMEOUT_MS` | 25000 → **12000** | 成功判定实测集中在 2.4~9.3s；12s 覆盖成功样本且把最坏批次砍掉一半多 |
+| `DEFAULT_JUDGE_TIMEOUT_MS`（代码默认） | 15_000 → 12_000 | 与 .env 对齐（**注意 `.env` 会覆盖代码默认值**，这次就是两处不一致才让 25s 生效） |
+| `FALLBACK_RESERVE_MS` | 5000 → 4000 | 兜底路径实测成功只需 3~5s |
+| `MAX_JUDGE_CANDIDATES` | 3 → 2 | 同批并行数直接决定批次墙钟的不确定性 |
+| `MAX_JUDGE_CALLS` | 10 → 6 → **5** | 单次最坏成本从 25s 降到 12s，次数同步收紧 |
+| `IMAGE_PHASE_BUDGET_MS`（新增） | — → 25_000 | 找图阶段总预算，超了就**不再开启新层级**，直接走品牌标兜底 |
+
+两个设计上的自我纠错，都写进了代码注释：
+
+- **找图预算闸门只能卡「层级起点」，绝不能卡单张质检。** 试过卡单张：官方域定向检索一次就吃掉全部预算，
+  后面**整批**质检全被判「预算用尽」而拒绝，连本来能过的好图一起丢。
+- **页面探测改并行**：原来「来源页 + 若干候选页」串行探，实测最坏 22s，纯串行浪费。
+
+### 5. 传输层重试：3/8 用例整条失败后的加固
+
+跑批时 **3 条用例**在定品阶段整条失败，用户直接看到 503。
+（注：那一轮商品库兜底刚被误删、出口只剩一条，所以是硬失败；兜底恢复后同类故障会降级出卡片，不再 503。）
+日志同一分钟内：
+
+```
+5:05:28 [transport] deepseek-v4.1-flash 传输层失败，800ms 后重试一次：fetch failed
+```
+
+**判读要点**：报错同时打在中转站、图片源等多个互不相干的主机上 ⇒
+不是上游某个服务不稳，是**本机出网链路在成片抽风**（可持续十几秒），
+原来的「只重试一次 + 固定 800ms」必然扛不住。
+
+`server/utils/transport.ts` 三条修正：
+
+1. 退避重试：含首次共 **3 次**、退避 `[800, 1600]ms`。
+2. **慢失败不重试**：单次尝试失败前已花掉 ≥5s 就判定「链路本身不通」，直接抛错。
+   依据是瞬时抖动都在几十~几百毫秒量级失败，而各调用方自己的超时是 40s/25s/15s，远大于 5s ——
+   这条规则只拦「长超时」那一类，不会误伤抖动。**不做这个判断，3 次 × 40s 最坏能把用户拖到两分钟。**
+3. **重试额度按调用方预算收窄**：单张图质检本来就会换 2 条取图路径各试一次，若每路径再默认重试 3 次
+   = 6 次多模态请求，而单图预算只有 12s ⇒ 那里传 `{ attempts: 2, backoffMs: [500] }`。
+
+同时新增 `describeTransportError(error)`：undici 把所有网络故障压成同一句 `fetch failed`，
+真实错因（`EAI_AGAIN`/`ECONNRESET`/`ENOTFOUND`/TLS）藏在 `error.cause`，并发失败时还可能是
+`AggregateError.errors[0]`。沿 cause 链逐层展开（带 `code`/`errno`、去重、限深 6 层）后再记日志 ——
+不然排查只能靠猜。
+
+### 6. 模型用「散文」回话时不再误报 503
+
+新暴露的失败模式：`未返回可解析的 JSON（finish_reason=stop，长度=1068）`。
+但**同一批的另一个用例正常返回了 `clarify_slots`**，正文是一句正常追问 ——
+说明模型在「该定品还是该追问」上本身就不稳，它有时直接用自然语言问你一句。
+
+这时把整条请求判成「买手大模型暂时不可用」是**误报**：模型好得很，只是没吐 JSON。
+改成：重试后仍非 JSON 且内容非空 ⇒ **按「追问」正文回收**，不再当故障。只有内容真的为空才抛错。
+
+### 7. 型号词元匹配的两处修正（回归测试驱动）
+
+- `extractUrlModelTokens` 曾把**主机名**也当型号词元（`g-search3.alicdn.com` → `SEARCH3`）⇒ 清洗时先剥掉 hostname。
+- 尺寸对的正则 `\d+[xX×]\d+` 会**吃掉型号**：`ATS-909X2` 的 `9X2` 被当成尺寸 ⇒ 改成 `\d{2,5}[xX×]\d{2,5}`（两侧都要求 ≥2 位）。
+- 匹配语义从「相等」改为**包含**，并新增品牌词元：URL 里的词元会和邻居粘连（`a211-8x42-main` → `A2118X42`），
+  相等语义会漏；`-?` 也补进正则，避免把 `WH-1000XM4` 切开。
+
+### 待办
+- 冷门用例里仍会出现「全链路无图且品牌标也没探到」的情况（如德生 Tecsun：官网无 favicon）。
+  可以考虑再接一个兜底源（品牌词元 + 通用图库），但优先级低 —— 前端已有文字块占位。
+
+## [2026-09-29 · 晚] — 核查「glm-5.3-flash 到底有没有视觉」：结论是有，此前是我误判
+
+### 结论
+`glm-5.3-flash` 是智谱官方标注的**原生多模态**模型（输入模态：视频 / 图像 / 文本 / 文件），
+且**两个中转站都把图片正常透传了**。此前「没视觉」的判断是错的，错在测试方法，不在模型。
+
+### 铁证（决定性测试）
+用 ImageMagick 现画一张只含随机串的图（`QZEMM8K`），让模型读出来：
+
+| 请求 | 结果 |
+| --- | --- |
+| 带图 | 答 `QZEMM8K` ✅，`prompt_tokens=185` |
+| 同一问题**不带图** | 答「我看不到您提到的图片。您的消息中没有附带任何图片，请上传图片后我再帮您识别。」，`prompt_tokens=31` |
+
+随机串不可能被猜中，对照组又明确拒答 ⇒ 图片确实进了模型，视觉成立。
+
+### 端点 × 模型实测矩阵
+
+| 端点 | 模型 | 带图 | 结果 |
+| --- | --- | --- | --- |
+| `cn.chatapi.app` | `glm-5.3-flash` | ✅ | 识别正确（Base64 Data URL / 远程 URL 均可） |
+| `cn.chatapi.app` | `glm-5.3` | ❌ | **HTTP 400** `模型请求失败，请稍后重试或更换模型`（同族但无视觉） |
+| `cn.chatapi.app` | `glm-5.3-flash` + 2.09MB 大图 | ✅ | `prompt_tokens=7037`，正确读出 `WH-1000XM4` |
+| `e-flowcode.cc` | `glm-5.3-flash` | ✅ | 正确描述截图 |
+| `e-flowcode.cc` | `deepseek-v4.1-flash` | ✅ | 正确描述截图 |
+
+两个附带发现：① `usage.prompt_tokens_details.image_tokens` 恒为 `0`，**不能**用它判断图有没有进去；
+② 同族换型号模态就变（`glm-5.3` 直接 400），而报错文案是通用兜底句，看不到真实原因，必须逐型号实测。
+
+### 根因：假性「没视觉」= 答案被思考过程挤空
+最初的探测用了 `max_tokens: 512`，返回：
+
+```
+content: ""              ← 客户端读到空，看起来像「模型什么都没说 / 看不见」
+finish_reason: "length"
+reasoning_content: "... Looking at the image, I can see: 1. Top left: 'Retail AI Agent' title in green"
+```
+
+**模型看见了，答案在 `reasoning_content` 里，只是最终答复被思考预算挤空。**
+这与本文件早先记录的「推理模型 content 会被思考过程挤空」是同一个坑 —— 换成图片请求时思考更长，更容易触发，
+而且症状（空字串）极易被读成「模型没有视觉能力」。把 `max_tokens` 提到 4096 后，同一请求正常作答。
+
+### 新增
+- `scripts/probe-vision.mjs`：单模型视觉探测。含 A/B/C 三段对照（纯文本连通性 / 同问题不带图 / 同问题带图），
+  并把「空 content + length」单独判定为**假性无视觉**而非「没视觉」。`max_tokens` 固定 4096。
+- `scripts/probe-vision-sweep.mjs`：同一张图横扫多个模型，输出 `content` / `reasoning` / `finish_reason` / token 用量。
+
+### 待办（产品侧仍未接视觉）
+模型有视觉 ≠ 应用能用视觉。当前三处都缺：① `InputBar.vue` 只有文本输入，无上传入口；
+② `llmBuyer.ts` 组装 messages 时不会拼 `content: [{type:'text'},{type:'image_url'}]` 数组；
+③ 响应读取只看 `message.content`。（③ 已是既有行为，文本链路有「空内容 + length ⇒ 加大 max_tokens 重试」兜底。）
+若要落地「拍照识物 / 以图搜货」，需补齐这三处。
+
+
+## [2026-09-29] — 定品链路反转：大模型优先，商品库降为兜底
+
+### 架构
+
+链路优先级从「商品库检索 → 模型写文案」改为 **「大模型亲自定品 → 商品库兜底」**：
+
+1. 首选：买手大模型（OpenAI 兼容端点，默认 `deepseek-v4.1-flash`）直接判断信息是否足够，足够就锁定一款真实在售商品并一次性产出卡片全字段；不足则只问一个最关键的问题。
+2. 兜底：首选链路不可用时，自动降级到原有的 Worker + D1 + Vectorize 商品库检索链路。D1 从此只承担兜底职责。
+
+`meta` 事件新增 `engine`（`llm` / `catalog`）与 `fallback_reason`，前端据此显示是「大模型定品 · <模型名>」还是「商品库兜底」，降级原因挂在徽章 tooltip 上。
+
+### 新增
+
+- `frontend/server/utils/llmBuyer.ts`：买手定品 provider 层。含推理模型适配、JSON 容错解析、超时控制与连续失败熔断。
+- `frontend/.env` 新增 `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL` / `LLM_TIMEOUT_MS` / `LLM_FALLBACK_*`（次选大模型，可留空）。
+
+### 三处必须记下的坑
+
+- **推理模型的 `content` 会被思考过程挤空**：`max_tokens` 给小了会全部消耗在 `reasoning_content` 上，`content` 返回空串且 `finish_reason=length`。已做「空内容 + length ⇒ 自动加大 max_tokens 重试」。
+- **中转站挂在 Cloudflare 后面，异常 User-Agent 直接 403（error code 1010）**：服务端请求必须显式带正常 UA。
+- **`thinking: {type: 'disabled'}` 在该中转站无效**：实测关闭思考后 reasoning 反而从 3674 字涨到 10827 字，不要指望靠这个字段提速。
+
+### 熔断
+
+同一 provider 连续失败 3 次后进入 90 秒冷却期，期间请求直接走兜底，不再让用户白等一个超时。实测第 4 次请求 0.3 秒返回，降级原因显示「处于熔断冷却期」。
+
+### 模型选型（同一份定品请求实测）
+
+| 模型 | 耗时 | JSON | 结论 |
+| --- | --- | --- | --- |
+| `deepseek-v4.1-flash` | 6.2s | 通过 | **默认采用** |
+| `doubao-seed-2.0-lite` | 6.7s | 通过 | 备选 |
+| `qwen3.8-flash` | 37.9s | 通过 | 太慢 |
+| `glm-5.3-flash` | 39~92s | 偶发被截断 | 推理型，不满足交互延迟 |
+
+### 前端
+
+- 状态徽章细化为「模型在线模式 / 大模型定品 · <模型名> / 商品库兜底 / 本地演示模式」四态。
+- 首次响应前不再显示「本地演示模式」（那原本只是未初始化的默认值）。
+- 定品等待期间显示「正在按你的场景筛品…」，避免数秒空等。
+
+### 修复
+
+- 推荐卡片无图时封面高度由固定 224px 收为 160px，不再留出一大块空灰块。
+- 卡片价格行在 `budget_tier` 为空时不再输出悬空的「·」分隔符（大模型链路该字段恒空）。
+- 「商品信息」区块在 `materials` 为空时不再占一个空行。
+
+### 验证
+
+- 端到端实测（Nuxt dev + 线上中转站）：完整需求 5.5s 出卡（Sony WH-1000XM4，规格与文案准确）；信息不足的「想买把椅子」正确转为单问追问；「香薰」正确追问蜡烛/扩香形态。
+- 降级链路实测：被迫失败后 0.1~0.5s 落到商品库兜底，卡片带图带来源；熔断期请求直接跳过首选链路。
+- 桌面 1440 / 移动 390 双视口截图核对，控制台零报错。
+
+### 已知缺口（下一步）
+
+- 大模型链路目前 `image` 与 `source_url` 恒为空（提示词要求「没把握就留空，绝不编造」），卡片因此无主图、无「查看官网」入口。下一步按 `docs/multimodal_retail_agent_architecture.md` 的方案 1 做 OG Image 极简提取 + 链接可达性校验。
+
+## [2026-09-29] — 聊天界面收为单列 + 品牌图标统一
+
+### 优化
+
+- 聊天界面去掉右侧「当前推荐 / 用户画像」状态面板，对话区改为单列满宽，推荐卡片不再被侧栏挤压。
+- 站点 favicon 换成机器人图标，并按内容边界裁满幅重制（原来四周留白约占三成）。
+
+### 聊天头像改为单色线稿 + CSS mask
+
+原来贴的是 icons8 的彩色位图（靛蓝／淡紫），和页面的薄荷绿系撞色，观感突兀。现改为单色线稿，**黑色原稿不直接使用**，改为：
+
+- `frontend/public/avatar-bot.svg`（顾问）／`frontend/public/avatar-user.svg`（用户）：potrace 描摹出的单色矢量，画布沿用 icons8 的 100×100 网格（保留作者的光学配平），仅把内容 bbox 在网格内几何居中。
+- `MessageList.vue` 用 `.avatar-glyph` + `background-color: currentColor` + `mask-image` 上色，墨色写在 CSS 里，便于统一调整：
+  - 顾问 `#059669`（emerald-600）—— 即改造前内联 SVG 用的墨色，品牌色归 AI。
+  - 用户 `#475569`（slate-600）—— 同样是改造前内联 SVG 的墨色，中性静默。
+- 圆底沿用原有设计（顾问近白圆底 / 用户薄荷圆底）未动：实测白圆底在薄荷页面背景下比淡绿圆底更清晰。
+- 字形尺寸做光学配平：顾问 36px、用户 34px。机器人是「宽而扁 + 内部细节密」的形，同尺寸下比圆润的人形读起来轻，放大一档后两者在 40px 圆内观感相当。
+
+### 资源
+
+- 新增 `frontend/public/avatar-bot.svg`、`frontend/public/avatar-user.svg`（矢量源同存 `frontend/assets/icons/`）。
+- 删除已被取代的 `frontend/public/avatar-{bot,user}.png`。
+- 重制 `frontend/public/favicon.png`（512×512），矢量源 `frontend/assets/icons/favicon-robot.svg`。
+
+### 验证
+
+- `nuxt build` 客户端与服务端均构建通过。
+- favicon 描摹保真度：渲回 256px 与原图比对，形状不一致率 <0.7%（差异集中在抗锯齿边缘）。
+- 聊天链路本地端到端实测通过（Nuxt dev + 线上 Worker，两轮对话出真实商品卡），控制台零报错；桌面 1440 / 移动 390 双视口截图核对，`avatar-glyph` 实算尺寸与颜色与预期一致。
+
 ## [2026-08-03] — 自然对话回归 30/30 与生产发布
 
 ### 修复

@@ -1,48 +1,76 @@
 <template>
   <div class="recommend-card overflow-hidden rounded-[24px] border border-white/50 shadow-[0_18px_46px_rgba(87,94,119,0.18)]">
-    <div class="recommend-cover relative h-56 overflow-hidden sm:h-64">
+    <!--
+      封面三种版式，按「有没有图 / 图是什么」分：
+      1. photo：真实商品图，铺满 + 裁切 + 底部压深色渐变，白字标题压在图上；
+      2. logo ：品牌官方标兜底。**不能铺满裁切** —— 方形标被 object-cover 裁掉两边很难看，
+               也不能在浅色底上压白字。改成居中 contain + 下方深色文字；
+      3. none ：连标都没有，退回纯文字块。
+    -->
+    <div
+      class="recommend-cover relative overflow-hidden"
+      :class="[photoMode ? 'h-56 sm:h-64' : 'h-40', logoMode ? 'recommend-cover--logo' : '']"
+    >
       <img
-        v-if="showImage"
+        v-if="photoMode"
         :src="displayImage"
         :alt="recommendation.name"
         class="h-full w-full object-cover"
         loading="lazy"
         @error="handleImageError"
       >
+      <div v-else-if="logoMode" class="flex h-full w-full flex-col items-center justify-center gap-2 px-6">
+        <img
+          :src="displayImage"
+          :alt="`${recommendation.brand} 标识`"
+          class="max-h-14 max-w-[55%] object-contain"
+          loading="lazy"
+          @error="handleImageError"
+        >
+        <p class="ui-label uppercase tracking-[0.22em] text-slate-400">{{ recommendation.category }}</p>
+        <h3 class="line-clamp-2 text-center ui-title font-semibold text-slate-700">{{ recommendation.name }}</h3>
+        <p class="ui-meta font-medium text-slate-500">{{ recommendation.price_range }}</p>
+      </div>
       <div v-else class="flex h-full w-full flex-col justify-end bg-[linear-gradient(135deg,#dceee8,#e7f0f7)] p-6">
-        <p class="text-[11px] uppercase tracking-[0.22em] text-slate-500">暂无可用商品图</p>
-        <p class="mt-2 max-w-md text-lg font-semibold leading-snug text-slate-700">{{ recommendation.name }}</p>
+        <p class="ui-label uppercase tracking-[0.22em] text-slate-500">暂无可用商品图</p>
+        <p class="mt-2 max-w-md ui-title font-semibold text-slate-700">{{ recommendation.name }}</p>
+        <p class="mt-1 ui-meta font-medium text-slate-500">{{ recommendation.price_range }}</p>
       </div>
-      <div v-if="showImage" class="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-slate-900/30 to-transparent" />
+      <div v-if="photoMode" class="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-slate-900/30 to-transparent" />
       <div class="absolute left-5 top-5 flex flex-wrap gap-2">
-        <span class="rounded-full bg-white/80 px-3 py-1 text-[11px] font-medium text-slate-700">{{ recommendation.category }}</span>
-        <span class="rounded-full bg-black/20 px-3 py-1 text-[11px] font-medium text-white backdrop-blur">{{ recommendation.brand }}</span>
+        <span class="rounded-full bg-white/80 px-3 py-1 ui-label font-medium text-slate-700">{{ recommendation.category }}</span>
+        <span
+          class="rounded-full px-3 py-1 ui-label font-medium"
+          :class="photoMode ? 'bg-black/20 text-white backdrop-blur' : 'bg-slate-900/5 text-slate-600'"
+        >{{ recommendation.brand }}</span>
       </div>
-      <div v-if="showImage" class="absolute bottom-5 left-5 right-5">
-        <p class="text-[11px] uppercase tracking-[0.22em] text-white/70">推荐单品</p>
-        <h3 class="mt-2 text-xl font-semibold leading-snug text-white sm:text-2xl">{{ recommendation.name }}</h3>
-        <div class="mt-2 flex flex-wrap gap-2 text-sm font-medium text-white/80">
+      <div v-if="photoMode" class="absolute bottom-5 left-5 right-5">
+        <p class="ui-label uppercase tracking-[0.22em] text-white/70">推荐单品</p>
+        <h3 class="ui-display mt-2 font-semibold text-white">{{ recommendation.name }}</h3>
+        <div class="mt-2 flex flex-wrap gap-2 ui-meta font-medium text-white/80">
           <span>{{ recommendation.price_range }}</span>
-          <span>·</span>
-          <span>{{ recommendation.budget_tier }}</span>
+          <template v-if="recommendation.budget_tier">
+            <span>·</span>
+            <span>{{ recommendation.budget_tier }}</span>
+          </template>
         </div>
       </div>
     </div>
 
-    <div class="space-y-5 px-5 py-5 text-sm font-normal leading-7 text-slate-600">
+    <div class="ui-body space-y-5 px-5 py-5 font-normal text-slate-600">
       <div class="summary-box rounded-2xl p-4">
-        <p class="mb-2 text-xs uppercase tracking-[0.2em] text-emerald-800/60">为什么先看它</p>
+        <p class="ui-label mb-2 uppercase tracking-[0.2em] text-emerald-800/60">为什么先看它</p>
         <p>{{ recommendation.consultant_summary }}</p>
       </div>
 
       <div class="grid gap-4 sm:grid-cols-2">
         <div>
-          <p class="mb-1 text-xs uppercase tracking-[0.18em] text-slate-400">商品信息</p>
-          <p>{{ recommendation.materials }}</p>
-          <p class="mt-2 text-slate-500">{{ recommendation.craftsmanship }}</p>
+          <p class="ui-label mb-1 uppercase tracking-[0.18em] text-slate-400">商品信息</p>
+          <p v-if="recommendation.materials">{{ recommendation.materials }}</p>
+          <p :class="recommendation.materials ? 'mt-2 text-slate-500' : ''">{{ recommendation.craftsmanship }}</p>
         </div>
         <div>
-          <p class="mb-1 text-xs uppercase tracking-[0.18em] text-slate-400">购买前看什么</p>
+          <p class="ui-label mb-1 uppercase tracking-[0.18em] text-slate-400">购买前看什么</p>
           <p>{{ recommendation.pairing_note }}</p>
         </div>
       </div>
@@ -58,7 +86,7 @@
       </div>
 
       <div>
-        <p class="mb-1 text-xs uppercase tracking-[0.18em] text-slate-400">下一步怎么选</p>
+        <p class="ui-label mb-1 uppercase tracking-[0.18em] text-slate-400">下一步怎么选</p>
         <p>{{ recommendation.why_not_others }}</p>
       </div>
 
@@ -67,7 +95,7 @@
           :href="recommendation.source_url"
           target="_blank"
           rel="noreferrer"
-          class="inline-flex items-center rounded-full border border-emerald-200/90 bg-emerald-50 px-4 py-2 text-xs font-medium tracking-[0.18em] text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-100"
+          class="inline-flex items-center rounded-full border border-emerald-200/90 bg-emerald-50 px-4 py-2 ui-meta font-medium tracking-[0.18em] text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-100"
         >
           查看官网
         </a>
@@ -85,6 +113,9 @@ const props = defineProps<{
 
 const imageFailed = ref(false)
 const useProxyFallback = ref(false)
+
+/** 后端标了 `image_kind: 'logo'` 就说明这张是品牌标兜底，不是商品图。 */
+const isLogo = computed(() => props.recommendation.image_kind === 'logo')
 
 function getProxyImage(image: string) {
   return `/api/image?url=${encodeURIComponent(image)}`
@@ -107,7 +138,11 @@ const displayImage = computed(() => {
   return getProxyImage(image)
 })
 
-const showImage = computed(() => Boolean(displayImage.value) && !imageFailed.value)
+const hasImage = computed(() => Boolean(displayImage.value) && !imageFailed.value)
+/** 版式一：真实商品图（铺满裁切）。 */
+const photoMode = computed(() => hasImage.value && !isLogo.value)
+/** 版式二：品牌标兜底（居中等比）。 */
+const logoMode = computed(() => hasImage.value && isLogo.value)
 
 function handleImageError() {
   if (props.recommendation.image?.startsWith('https://') && !useProxyFallback.value) {
@@ -131,6 +166,15 @@ watch(() => props.recommendation.image, () => {
 
 .recommend-cover {
   background: #dfe9e4;
+}
+
+/*
+ * 品牌标版式的底色：比商品图的 #dfe9e4 更浅更中性。
+ * 官方标多为深色或彩色的方形图，压在偏绿的底上会显得脏，
+ * 近白底更像「品牌铭牌」，也更接近我们自己品牌页的观感。
+ */
+.recommend-cover--logo {
+  background: linear-gradient(135deg, #f7faf9, #eef3f6);
 }
 
 .summary-box {

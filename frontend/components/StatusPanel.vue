@@ -1,20 +1,20 @@
 <template>
   <aside class="status-panel flex min-h-0 flex-col px-5 py-5 sm:px-6">
     <div class="space-y-4" :class="activeRecommendation ? '' : '-mt-2'">
-      <div v-if="activeRecommendation" class="glass-panel rounded-[24px] px-5 py-4 text-[15px] font-medium leading-7 text-slate-700">
-        <p class="panel-kicker text-[11px] uppercase tracking-[0.28em]">当前推荐</p>
-        <h3 class="mt-3 text-2xl font-semibold leading-tight text-slate-800">{{ activeRecommendation.name }}</h3>
-        <p class="mt-2 text-[15px] leading-7 text-slate-600">
+      <div v-if="activeRecommendation" class="glass-panel ui-body rounded-[24px] px-5 py-4 font-medium text-slate-700">
+        <p class="panel-kicker ui-label uppercase tracking-[0.28em]">当前推荐</p>
+        <h3 class="ui-display mt-3 font-semibold text-slate-800">{{ activeRecommendation.name }}</h3>
+        <p class="ui-body mt-2 text-slate-600">
           {{ activeRecommendation.category }} · {{ activeRecommendation.budget_tier }}
         </p>
-        <p class="mt-3 text-[15px] leading-7 text-slate-700">{{ activeRecommendation.consultant_summary }}</p>
+        <p class="ui-body mt-3 text-slate-700">{{ activeRecommendation.consultant_summary }}</p>
       </div>
 
       <div v-if="profileSummary.length" class="flex flex-wrap gap-3">
         <div
           v-for="summary in profileSummary"
           :key="summary"
-          class="glass-chip inline-flex w-fit max-w-full rounded-[24px] px-4 py-3 text-[15px] font-medium leading-7 text-slate-700"
+          class="glass-chip ui-body inline-flex w-fit max-w-full rounded-[24px] px-4 py-3 font-medium text-slate-700"
         >
           {{ summary }}
         </div>

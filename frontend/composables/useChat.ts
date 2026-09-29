@@ -20,6 +20,11 @@ function applyServerEvent(rawEvent: string, assistantMessage: ChatMessage, state
   conversationStage: Ref<string>
   profileSummary: Ref<string[]>
   activeRecommendation: Ref<Recommendation | null>
+  engine: Ref<'catalog' | 'llm' | ''>
+  fallbackReason: Ref<string>
+  hasResponded: Ref<boolean>
+  searched: Ref<boolean>
+  searchQueries: Ref<string[]>
 }) {
   const lines = rawEvent.split('\n')
   const eventLine = lines.find((line) => line.startsWith('event:'))
@@ -45,7 +50,10 @@ function applyServerEvent(rawEvent: string, assistantMessage: ChatMessage, state
   }
 
   if (eventName === 'meta') {
+    state.hasResponded.value = true
     state.demoMode.value = data.mode === 'mock'
+    state.engine.value = data.engine === 'llm' || data.engine === 'catalog' ? data.engine : ''
+    state.fallbackReason.value = data.fallback_reason ?? ''
     if (data.stage) {
       state.conversationStage.value = data.stage
       if (data.stage !== 'rag_recommendation') {
@@ -54,6 +62,14 @@ function applyServerEvent(rawEvent: string, assistantMessage: ChatMessage, state
       }
     }
     state.profileSummary.value = data.profile_summary ?? []
+    // 联网检索状态：pending 阶段没有这两个字段，别把上一轮的结果带过来。
+    if (data.pending === true) {
+      state.searched.value = false
+      state.searchQueries.value = []
+    } else {
+      state.searched.value = data.searched === true
+      state.searchQueries.value = Array.isArray(data.search_queries) ? data.search_queries : []
+    }
     return
   }
 
@@ -69,6 +85,13 @@ export function useChat() {
   const isStreaming = ref(false)
   const nextId = ref(2)
   const demoMode = ref(true)
+  const engine = ref<'catalog' | 'llm' | ''>('')
+  const fallbackReason = ref('')
+  // 首次响应前不该断言「演示模式」—— 那只是初始值，不是事实。
+  const hasResponded = ref(false)
+  // 本轮是否真的联网检索过，以及检索用的关键词。
+  const searched = ref(false)
+  const searchQueries = ref<string[]>([])
   const conversationStage = ref('clarify_space')
   const profileSummary = ref<string[]>([])
   const activeRecommendation = ref<Recommendation | null>(null)
@@ -86,6 +109,11 @@ export function useChat() {
     isStreaming.value = false
     nextId.value = 2
     demoMode.value = true
+    engine.value = ''
+    fallbackReason.value = ''
+    hasResponded.value = false
+    searched.value = false
+    searchQueries.value = []
     conversationStage.value = 'clarify_space'
     profileSummary.value = []
     activeRecommendation.value = null
@@ -167,6 +195,11 @@ export function useChat() {
             conversationStage,
             profileSummary,
             activeRecommendation,
+            engine,
+            fallbackReason,
+            hasResponded,
+            searched,
+            searchQueries,
           })
         }
 
@@ -181,6 +214,11 @@ export function useChat() {
           conversationStage,
           profileSummary,
           activeRecommendation,
+          engine,
+          fallbackReason,
+          hasResponded,
+          searched,
+          searchQueries,
         })
       }
 
@@ -203,11 +241,16 @@ export function useChat() {
     conversationStage,
     demoMode,
     draft,
+    engine,
+    fallbackReason,
+    hasResponded,
     isStreaming,
     messages,
     profileSummary,
     quickPrompts,
     resetChat,
+    searched,
+    searchQueries,
     sendMessage,
   }
 }

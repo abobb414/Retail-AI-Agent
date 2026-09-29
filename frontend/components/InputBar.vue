@@ -4,7 +4,7 @@
       ref="inputElement"
       :value="modelValue"
       type="text"
-      class="flex-1 border-0 bg-transparent text-[15px] font-normal text-slate-700 outline-none placeholder:text-slate-400 disabled:cursor-not-allowed"
+      class="ui-body flex-1 border-0 bg-transparent font-normal text-slate-700 outline-none placeholder:text-slate-400 disabled:cursor-not-allowed"
       placeholder="比如：夏天通勤穿的半袖，预算 300 以内"
       :disabled="disabled"
       @input="updateValue"
