@@ -39,7 +39,7 @@ export default defineNuxtConfig({
       link: [
         // favicon 本体被 vercel.json 设了长缓存，浏览器还有一层独立的 favicon 缓存，
         // 改图标时必须把这里的 v= 版本号 +1 才能强制所有人刷新。
-        { rel: 'icon', type: 'image/png', href: '/favicon.png?v=20260929b' },
+        { rel: 'icon', type: 'image/png', href: '/favicon.png?v=20260929c' },
       ],
     },
   },
