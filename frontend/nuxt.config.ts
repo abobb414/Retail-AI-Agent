@@ -39,7 +39,12 @@ export default defineNuxtConfig({
       link: [
         // favicon 本体被 vercel.json 设了长缓存，浏览器还有一层独立的 favicon 缓存，
         // 改图标时必须把这里的 v= 版本号 +1 才能强制所有人刷新。
-        { rel: 'icon', type: 'image/png', href: '/favicon.png?v=20260929c' },
+        // 图标源图：https://img.icons8.com/pulsar-color/1600/message-bot.png（1600px 原生源，
+        // 只做等比缩放，未重绘 —— 换图时按 icon-to-vector-favicon 流程重跑生成脚本即可）。
+        { rel: 'icon', type: 'image/x-icon', href: '/favicon.ico?v=20260930b', sizes: 'any' },
+        { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg?v=20260930b' },
+        { rel: 'icon', type: 'image/png', href: '/favicon.png?v=20260930b' },
+        { rel: 'apple-touch-icon', sizes: '180x180', href: '/apple-touch-icon.png?v=20260930b' },
       ],
     },
   },
