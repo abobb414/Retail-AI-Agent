@@ -11,3 +11,4 @@ node_modules
 .vercel-deployed-product-card.png
 .DS_Store
 npm-debug.log*
+.env*
