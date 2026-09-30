@@ -2,10 +2,12 @@
 
 # Retail AI Agent
 
-**面向零售导购场景的 AI 推荐系统。中文自然语言进，一张真实在售商品卡出。**
+**面向零售导购场景的 AI 推荐系统。一句中文说清你的场景，回你一张能直接下单的真实商品卡。**
 
-首选由**买手大模型亲自定品** —— 它自己判断需求够不够、锁死一款真实型号、一次性产出卡片全字段；
-只有当大模型不可用时，才自动降级到 **Cloudflare Worker + D1 + Vectorize** 的商品库 RAG 链路。
+不做关键词搜索，也不甩一屏列表。它更像守在店里的老买手：先听你把场景说完 ——
+信息不够，就只问最关键的那一句；信息够了，直接锁定**一款**真实在售的型号，
+把「为什么是它、谁不适合、下一步怎么挑」一次讲完，并留好跳转官网的入口。
+整条链路按「任何一环挂掉，都不该让用户看到白屏或 5xx」来设计。
 
 [**retail.abobb.site**](https://retail.abobb.site) &nbsp;·&nbsp; [retail.abobb.com](https://retail.abobb.com) &nbsp;·&nbsp; [Worker API](https://retail-ai-agent-worker.abobb-retail-ai-agent.workers.dev) &nbsp;·&nbsp; [Issues](https://github.com/abobb414/Retail-AI-Agent/issues)
 
@@ -14,7 +16,7 @@
 [![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-F6821F?style=flat-square)](#架构)
 [![System Test](https://img.shields.io/badge/system%20test-30%2F30-22c55e?style=flat-square)](#测试)
 [![Catalog](https://img.shields.io/badge/catalog-2%2C746%20SKUs-0ea5e9?style=flat-square)](#架构)
-[![Fallback](https://img.shields.io/badge/fallback%20link-0.18s-22c55e?style=flat-square)](#性能)
+[![Image Pipeline](https://img.shields.io/badge/image%20pipeline-4%20levels-8b5cf6?style=flat-square)](#特性)
 
 </div>
 
@@ -24,23 +26,33 @@
 
 ### 桌面端
 
-<div align="center">
-
-<img src="./docs/images/preview-desktop-home.jpg" alt="桌面端首屏 —— 欢迎语与三个场景快捷入口" />
-
-<img src="./docs/images/preview-desktop-chat.jpg" alt="桌面端一轮问答 —— 直接锁定型号并产出商品卡" />
-
-</div>
+<table>
+<tr>
+<td width="100%" align="center"><img src="./docs/images/preview-desktop-home.jpg" alt="桌面端首屏" /></td>
+</tr>
+<tr>
+<td align="center"><sub><b>首屏</b> · 欢迎语 + 三个场景快捷入口</sub></td>
+</tr>
+<tr>
+<td width="100%" align="center"><img src="./docs/images/preview-desktop-chat.jpg" alt="桌面端一轮问答的产物" /></td>
+</tr>
+<tr>
+<td align="center"><sub><b>一轮问答</b> · 买手大模型直接锁定型号并产出商品卡</sub></td>
+</tr>
+</table>
 
 ### 移动端
 
-<div align="center">
-
-<img src="./docs/images/preview-mobile-home.jpg" alt="移动端首屏" width="300" /> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <img src="./docs/images/preview-mobile-chat.jpg" alt="移动端一轮问答的产物" width="300" />
-
-<sub>← 首屏 · 欢迎语与场景快捷入口 &nbsp;|&nbsp; 一轮问答 · 定品与商品卡 →</sub>
-
-</div>
+<table>
+<tr>
+<td width="50%" align="center"><img src="./docs/images/preview-mobile-home.jpg" alt="移动端首屏" width="300" /></td>
+<td width="50%" align="center"><img src="./docs/images/preview-mobile-chat.jpg" alt="移动端一轮问答的产物" width="300" /></td>
+</tr>
+<tr>
+<td align="center"><sub><b>首屏</b> · 欢迎语 + 场景快捷入口</sub></td>
+<td align="center"><sub><b>一轮问答</b> · 定品与商品卡</sub></td>
+</tr>
+</table>
 
 > 四张图均取自线上 `retail.abobb.site`，未经修饰。其中「一轮问答」是**一次真实对话**：用户说
 > 「夏天通勤穿的半袖，预算 300 以内，男士，身高 175cm，平时穿 L 码」，买手大模型一轮直接锁定型号并产出卡片。
@@ -49,28 +61,15 @@
 
 ## 特性
 
-### 🎯 两级定品链路
+### 🎯 什么时候追问，什么时候定品
 
 这个项目不是电商搜索框，也不是只会闲聊的客服机器人。它验证的是更接近**线下导购**的体验：
 
-| | 首选：买手大模型定品 | 兜底：商品库 RAG |
-|---|---|---|
-| **做什么** | 判断需求是否完整 → 锁定一款真实在售型号 → 产出卡片全字段 | D1 精确召回优先，Vectorize 语义召回兜底 |
-| **依赖大模型吗** | 是 | **完全不依赖** |
-| **中转站挂了** | 一起挂 | **照样出卡片** |
-| **实测耗时** | 快路径 ~8s；含取图与质检的完整路径 30～70s | **0.18s** |
-
-两级是**串联**的：首选失败（网络失败 / 超时 / JSON 不合法 / 字段不完整）才走兜底。
-正常路径上兜底连碰都不会碰，零额外延迟。只有**两条链路同时**不可用才返回 503，
-且错误文案里分别给出两条链路各自的原因，不给一句笼统的「失败了」。
-
-### 🧠 什么时候追问，什么时候定品
-
-- 信息不足时**只问一个最关键的问题**（比如「男士还是女士穿？身高体重或常穿尺码也给我一个」），不出卡片。
-- 信息足够时直接定品，并给出针对用户场景的理由、适配与不适配人群、下一步怎么选。
-- 提示词明确要求：**商品型号、参数、价格不得编造**。
-- 多轮会话里的预算、人群、品类约束会被继承，但不会把上一轮的需求错误带进下一轮独立选品。
-- 模型偶发「忘记输出 JSON、直接回一段散文」时，这段散文会被**回收为追问正文**，不判为故障。
+- 信息不足时**只问一个最关键的问题**（比如「男士还是女士穿？身高体重或常穿尺码也给我一个」），不出卡片；
+- 信息足够时**直接锁定一款型号** —— 不甩二十个候选让人自己挑，并给出针对场景的理由、适配与不适配人群、下一步怎么选；
+- 多轮会话里的预算、人群、品类约束会被继承，但不会把上一轮的需求错误带进下一轮独立选品；
+- 商品型号、参数、价格**不得编造** —— 宁可少说，不许瞎说；
+- 偶发「该给结构化结果却回了一段散文」时，这段散文会被**回收为追问正文**，不判为故障，用户侧完全无感。
 
 ### 🖼️ 商品图：四级取图 + 品牌标兜底
 
