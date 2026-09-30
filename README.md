@@ -28,22 +28,23 @@
 
 <table>
 <tr>
-<td width="100%" align="center"><img src="./docs/images/preview-desktop-home.jpg" alt="桌面端首屏" /></td>
+<td colspan="2" align="center"><b>桌面端</b></td>
 </tr>
 <tr>
-<td align="center"><sub><b>首屏</b> · 欢迎语 + 三个场景快捷入口</sub></td>
+<td colspan="2" align="center"><img src="./docs/images/preview-desktop-home.jpg" alt="桌面端首屏" /></td>
 </tr>
 <tr>
-<td width="100%" align="center"><img src="./docs/images/preview-desktop-chat.jpg" alt="桌面端一轮问答的产物" /></td>
+<td colspan="2" align="center"><sub><b>首屏</b> · 欢迎语 + 三个场景快捷入口</sub></td>
 </tr>
 <tr>
-<td align="center"><sub><b>一轮问答</b> · 买手大模型直接锁定型号并产出商品卡</sub></td>
+<td colspan="2" align="center"><img src="./docs/images/preview-desktop-chat.jpg" alt="桌面端一轮问答的产物" /></td>
 </tr>
-</table>
-
-### 移动端
-
-<table>
+<tr>
+<td colspan="2" align="center"><sub><b>一轮问答</b> · 买手大模型直接锁定型号并产出商品卡</sub></td>
+</tr>
+<tr>
+<td colspan="2" align="center"><b>移动端</b></td>
+</tr>
 <tr>
 <td width="50%" align="center"><img src="./docs/images/preview-mobile-home.jpg" alt="移动端首屏" width="300" /></td>
 <td width="50%" align="center"><img src="./docs/images/preview-mobile-chat.jpg" alt="移动端一轮问答的产物" width="300" /></td>
