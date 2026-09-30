@@ -24,8 +24,6 @@
 
 ## 预览
 
-### 桌面端
-
 <table>
 <tr>
 <td colspan="2" align="center"><b>桌面端</b></td>
