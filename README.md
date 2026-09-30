@@ -22,19 +22,27 @@
 
 ## 预览
 
+### 桌面端
+
+<img src="./docs/images/preview-desktop-home.jpg" alt="桌面端首屏 —— 欢迎语与三个场景快捷入口" width="100%" />
+
+<img src="./docs/images/preview-desktop-chat.jpg" alt="桌面端一轮问答的产物 —— 直接锁定型号并产出商品卡" width="100%" />
+
+### 移动端
+
 <table>
 <tr>
-<td width="50%" align="center"><b>桌面端 · 首屏</b><br/><img src="./docs/images/preview-desktop-home.jpg" alt="桌面端首屏" /></td>
-<td width="50%" align="center"><b>移动端 · 首屏</b><br/><img src="./docs/images/preview-mobile-home.jpg" alt="移动端首屏" /></td>
+<td width="50%" align="center"><img src="./docs/images/preview-mobile-home.jpg" alt="移动端首屏" width="290" /></td>
+<td width="50%" align="center"><img src="./docs/images/preview-mobile-chat.jpg" alt="移动端一轮问答的产物" width="290" /></td>
 </tr>
 <tr>
-<td width="50%" align="center"><b>桌面端 · 一轮问答的产物</b><br/><img src="./docs/images/preview-desktop-chat.jpg" alt="桌面端推荐结果" /></td>
-<td width="50%" align="center"><b>移动端 · 一轮问答的产物</b><br/><img src="./docs/images/preview-mobile-chat.jpg" alt="移动端推荐结果" /></td>
+<td align="center"><sub>首屏 · 欢迎语与场景快捷入口</sub></td>
+<td align="center"><sub>一轮问答 · 定品与商品卡</sub></td>
 </tr>
 </table>
 
-> 上排是首屏（欢迎语 + 三个场景快捷入口），下排是**一次真实问答**：用户说「夏天通勤穿的半袖，预算 300 以内，男士，身高 175cm，平时穿 L 码」，
-> 由买手大模型直接锁定型号并产出卡片。四张图均取自线上 `retail.abobb.site`，未经修饰。
+> 四张图均取自线上 `retail.abobb.site`，未经修饰。其中「一轮问答」是**一次真实对话**：用户说
+> 「夏天通勤穿的半袖，预算 300 以内，男士，身高 175cm，平时穿 L 码」，买手大模型一轮直接锁定型号并产出卡片。
 
 ---
 
