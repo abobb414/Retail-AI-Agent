@@ -2,6 +2,11 @@
 
 <div align="center">
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/images/logo-white.png" />
+  <img src="./docs/images/logo.png" alt="Retail AI Agent" width="124" />
+</picture>
+
 # Retail AI Agent
 
 **面向零售导购场景的 AI 推荐系统。一句中文说清你的场景，回你一张能直接下单的真实商品卡。**
