@@ -2,6 +2,11 @@
 
 <div align="center">
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/images/logo-white.png" />
+  <img src="./docs/images/logo.png" alt="Retail AI Agent" width="124" />
+</picture>
+
 # Retail AI Agent
 
 **An AI recommendation system for retail sales assistance. Describe your scenario in one sentence of Chinese, and get back a real product card you can order right away.**
