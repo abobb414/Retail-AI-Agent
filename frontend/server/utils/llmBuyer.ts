@@ -188,7 +188,8 @@ export function isProviderCoolingDown(providerLabel: string) {
   return Boolean(state && state.openUntil > Date.now())
 }
 
-function noteFailure(providerLabel: string) {
+/** 供测试驱动熔断器状态（同 resetBreakers，在本模块外没有别的调用方）。 */
+export function noteFailure(providerLabel: string) {
   const state = breaker.get(providerLabel) ?? { failures: 0, openUntil: 0 }
   state.failures += 1
   if (state.failures >= FAILURE_THRESHOLD) {
@@ -202,8 +203,12 @@ function noteSuccess(providerLabel: string) {
   breaker.delete(providerLabel)
 }
 
+/** 「可用线路」日志只打一次，避免每条消息都刷屏。 */
+let providerLineupLogged = false
+
 export function resetBreakers() {
   breaker.clear()
+  providerLineupLogged = false
 }
 
 const WEB_SEARCH_TOOL = {
@@ -291,27 +296,54 @@ function buildSystemPrompt() {
 }
 
 /**
- * 定品 provider —— **只有 e-flowcode 一条**（2026-09-29 用户要求：「api 只留 e-flowcode」）。
+ * 定品 provider —— **数组顺序即优先级**。
  *
- * 之前这里还会追加一个 `LLM_FALLBACK_*` 备选模型。去掉的理由不是"它坏了"，而是：
- * 1. 首选失败时再去试备选，用户要多等一个**完整超时**（实测 40s）才看到兜底结果 ——
- *    而备选链路实测从没赢过（同协议同中转，抖动是链路级的，换模型救不回来）；
- * 2. 两路 key 分散了排障视线：出现「模型请求失败」时，日志里分不清是哪条路的问题。
- * 现在失败就是失败，快速报错，不再用一个大概率也没用的备选拖长时间。
+ * 1️⃣ 主线路：`LLM_BASE_URL`（第三方中转站，本项目用 e-flowcode）
+ * 2️⃣ 备用线路：`LLM_FALLBACK_BASE_URL`（DeepSeek 官方直连），仅当配了 KEY 时追加
+ *
+ * ⚠️ 这里 2026-09-29 删过一次备用项、2026-10-02 又加回来。不是反复横跳，
+ *    是**备胎的性质变了**，两者的区别正好是"该不该留"的判据：
+ *    · 删掉的那个 = **同一个中转站换个型号**。抖动是链路级的（出海口被干扰），
+ *      换模型救不回来，只让用户多等一个完整超时（实测 40s）。
+ *    · 现在这个 = **换出口**。中转站走跨境，官方直连在国内，故障域不重叠。
+ *      10-02 的排障恰好证明这类故障是真实且高频的：跨境长连接在 30~58s 之间被掐
+ *      （UND_ERR_SOCKET / ERR_SSL_DECRYPTION_FAILED_OR_BAD_RECORD_MAC），
+ *      而同期国内站点空闲 45s 稳定。**换国内出口是真的能救的。**
+ *
+ * 失败切换不需要额外代码：decideProductWithLlm 本来就是「按顺序试，抛错就下一条」。
+ * 熔断器按 label 分组，于是「主线路连挂 3 次 → 之后 90s 内所有请求直奔官方」也是自动的。
  */
-function resolveProviders(config: ReturnType<typeof useRuntimeConfig>): LlmProvider[] {
-  if (!config.llmApiKey || !config.llmBaseUrl || !config.llmModel) {
-    return []
-  }
+export function resolveProviders(config: ReturnType<typeof useRuntimeConfig>): LlmProvider[] {
+  const providers: LlmProvider[] = []
 
-  return [
-    {
+  if (config.llmApiKey && config.llmBaseUrl && config.llmModel) {
+    providers.push({
       label: config.llmModel,
       baseUrl: config.llmBaseUrl,
       apiKey: config.llmApiKey,
       model: config.llmModel,
-    },
-  ]
+    })
+  }
+
+  const fallbackKey = config.llmFallbackApiKey
+  const fallbackBaseUrl = config.llmFallbackBaseUrl
+  const fallbackModel = config.llmFallbackModel
+
+  if (fallbackKey && fallbackBaseUrl && fallbackModel) {
+    // label 同时是熔断器的分组键 —— 两条线路重名会把彼此的失败算到同一个熔断器上
+    // （后果是「官方明明好好的却被跟着一起拉黑 90s」）。重名时补出口域名区分开。
+    const duplicated = providers.some((provider) => provider.label === fallbackModel)
+
+    providers.push({
+      label: duplicated ? `${fallbackModel}@${safeHostname(fallbackBaseUrl) || 'fallback'}` : fallbackModel,
+      baseUrl: fallbackBaseUrl,
+      apiKey: fallbackKey,
+      model: fallbackModel,
+      timeoutMs: Number(config.llmFallbackTimeoutMs) || undefined,
+    })
+  }
+
+  return providers
 }
 
 export function hasLlmProvider(config: ReturnType<typeof useRuntimeConfig>) {
@@ -320,20 +352,38 @@ export function hasLlmProvider(config: ReturnType<typeof useRuntimeConfig>) {
 
 /**
  * 视觉质检用的 provider。
- * 默认复用定品同一条中转站链路，可用 `IMAGE_JUDGE_MODEL` 单独指一个多模态模型
- * （比如定品用快模型、质检用好模型）。实测 `deepseek-v4.1-flash` 看图 5.6s 且
- * `glm-5.3-flash` 也能看，两者都不必换。
  *
- * 同样只认 e-flowcode 这一条（见 resolveProviders 的说明）。
+ * 默认复用定品的那条链路，但**会挑一条不在熔断期里的**。这一步是必要的：
+ * 质检是「每张候选图一次多模态调用」，主线路被跨境干扰打挂时若还硬走它，
+ * 结果就是每张图白等一个 12s 超时直到预算耗尽，卡片全退成品牌标兜底。
+ * 备用线路的 `deepseek-flash` 实测**同样能读图**（官方模型列表里
+ * `input_modalities: ["text","image"]`），所以这个降级是实打实的。
+ *
+ * `IMAGE_JUDGE_MODEL` 只在主线路出口上生效 —— 它的口径是「同一家换个型号」
+ * （定品用快模型、质检用好模型），而备用出口是另一家供应商，不一定有那个型号。
  */
-function resolveVisionProvider(config: ReturnType<typeof useRuntimeConfig>): LlmProvider | null {
-  const model = config.imageJudgeModel || config.llmModel
+export function resolveVisionProvider(
+  config: ReturnType<typeof useRuntimeConfig>,
+  activeProvider?: LlmProvider,
+): LlmProvider | null {
+  const [primary, ...rest] = resolveProviders(config)
 
-  if (config.llmApiKey && config.llmBaseUrl && model) {
-    return { label: model, baseUrl: config.llmBaseUrl, apiKey: config.llmApiKey, model }
+  // 🔴 优先跟着**刚刚定品成功的那条线路**走，不能只看熔断状态。
+  //    熔断阈值是「连续 3 次」，主线路第一次失败就会把定品切给备用 —— 此时它还没进冷却期。
+  //    质检若照旧走它，每张候选图白等一个 12s 超时直到预算耗尽，卡片全退成品牌标兜底。
+  //    （2026-10-02 故障注入时实测到的就是这个：定品已落到官方，质检还在往死线路上打。）
+  const active =
+    activeProvider ?? [primary, ...rest].find((provider) => provider && !isProviderCoolingDown(provider.label))
+
+  if (!active) {
+    return null
   }
 
-  return null
+  if (primary && config.imageJudgeModel && active.label === primary.label) {
+    return { ...active, label: config.imageJudgeModel, model: config.imageJudgeModel }
+  }
+
+  return active
 }
 
 /**
@@ -342,16 +392,20 @@ function resolveVisionProvider(config: ReturnType<typeof useRuntimeConfig>): Llm
  * 拿不到 provider（没配 key）或显式关掉（`IMAGE_JUDGE=0`）时返回 undefined，
  * 上层据此退回「只认品牌官方域名」的老规则 —— 两条路径都必须能跑，
  * 因为视觉质检是可选增强，不该成为链路能不能用的前提。
+ *
+ * `activeProvider` 传「本次定品实际成功的那条线路」：定品已经切到备用线路时，
+ * 质检也必须一起切，否则等于拿一条已知不通的路去判定每一张图。见 resolveVisionProvider。
  */
 function createImageJudge(
   config: ReturnType<typeof useRuntimeConfig>,
   product: LlmLockedProduct,
+  activeProvider?: LlmProvider,
 ): ImageJudgeFn | undefined {
   if (!config.enableImageJudge) {
     return undefined
   }
 
-  const provider = resolveVisionProvider(config)
+  const provider = resolveVisionProvider(config, activeProvider)
 
   if (!provider) {
     return undefined
@@ -1299,14 +1353,27 @@ export async function decideProductWithLlm(
     throw new Error('未配置 LLM_API_KEY，无法使用大模型定品。')
   }
 
-  const errors: string[] = []
-  const timeoutMs = Number(config.llmTimeoutMs) || DEFAULT_LLM_TIMEOUT_MS
+  // 每个进程只打一次：用来回答「备用线路到底注册上了没有」。
+  // 这个项目里 env 是构建时烤进产物的，配置对不对只能从日志看，没有别的口子。
+  if (!providerLineupLogged) {
+    providerLineupLogged = true
+    console.log(
+      `[llmBuyer] 可用线路 ${providers.length} 条：`,
+      providers.map((provider) => `${provider.label}@${safeHostname(provider.baseUrl) || '?'}`).join(' → '),
+    )
+  }
 
-  for (const provider of providers) {
+  const errors: string[] = []
+  const defaultTimeoutMs = Number(config.llmTimeoutMs) || DEFAULT_LLM_TIMEOUT_MS
+
+  for (const [index, provider] of providers.entries()) {
     if (isProviderCoolingDown(provider.label)) {
       errors.push(`${provider.label} 处于熔断冷却期`)
       continue
     }
+
+    /** 每条线路可以有自己的上限：跨境中转站要留足，国内直连不必陪着一起等 40s。 */
+    const timeoutMs = provider.timeoutMs ?? defaultTimeoutMs
 
     const startedAt = Date.now()
     /** 已经下发给调用方的定品结论；非空即表示「用户那边已经看到东西了」。 */
@@ -1365,7 +1432,8 @@ export async function decideProductWithLlm(
         const imagePhaseDeadline = probeStartedAt + IMAGE_PHASE_BUDGET_MS
 
         // 视觉质检回调：拿不到就返回 undefined，下面每一级都会退回老规则。
-        const judgeImage = createImageJudge(config, product)
+        // 显式传 provider —— 让质检跟着「刚刚定品成功的这条线路」走，见 resolveVisionProvider。
+        const judgeImage = createImageJudge(config, product, provider)
         let judgeMs = 0
         let judgeCalls = 0
         let judgeWallStartedAt = 0
@@ -1646,6 +1714,16 @@ export async function decideProductWithLlm(
 
       noteFailure(provider.label)
       errors.push(error instanceof Error ? error.message : String(error))
+
+      // 备用线路兜住了也要留下痕迹：否则日志里只看得到一句平铺的成功，
+      // 换成「主线路其实一直在挂、全靠官方撑着」这种慢性病就永远发现不了。
+      const next = providers[index + 1]
+      if (next) {
+        console.warn(
+          `[llmBuyer] 线路 ${index + 1}/${providers.length}「${provider.label}」失败，切换「${next.label}」重试：`,
+          error instanceof Error ? error.message : String(error),
+        )
+      }
     }
   }
 

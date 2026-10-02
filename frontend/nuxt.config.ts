@@ -9,6 +9,19 @@ export default defineNuxtConfig({
     llmModel: process.env.LLM_MODEL || 'glm-5.3-flash',
     // 单次定品调用上限。快模型 6~7s 就够；换成 glm-5.3-flash 这类推理模型要 40s 以上。
     llmTimeoutMs: Number(process.env.LLM_TIMEOUT_MS || 40000),
+
+    // ── 备用线路：第三方中转站不可用时的第二条腿（DeepSeek 官方直连）────────
+    // 🔴 与已废弃的「同站换模型」备选不是一回事：那条是同一个出口换个型号
+    //    （抖动是链路级的，换模型救不回来）；这条换的是**出口**——中转站走跨境，
+    //    官方直连在国内，两者的故障域不重叠。见 resolveProviders 的说明。
+    // 只填了 KEY 才会启用（baseUrl / model 有可用默认值，换供应商时才需要改）。
+    llmFallbackApiKey: process.env.LLM_FALLBACK_API_KEY || '',
+    llmFallbackBaseUrl: process.env.LLM_FALLBACK_BASE_URL || 'https://api.deepseek.com/v1',
+    // ⚠️ 官方端点上的模型 **ID** 是 `deepseek-flash`（显示名才叫 DeepSeek-V4.1-Flash）。
+    //    传显示名会被 400 拒掉：The supported API model names are deepseek-flash, deepseek-v4-pro.
+    llmFallbackModel: process.env.LLM_FALLBACK_MODEL || 'deepseek-flash',
+    // 备用线路单次调用上限，留空则用 LLM_TIMEOUT_MS。国内直连快，通常不必给 40s。
+    llmFallbackTimeoutMs: Number(process.env.LLM_FALLBACK_TIMEOUT_MS || 0),
     // 视觉质检：把候选商品图真的发给多模态模型看一眼再上卡片。
     // 关掉（IMAGE_JUDGE=0）则退回「只认品牌官方域名」的老规则。
     enableImageJudge: process.env.IMAGE_JUDGE !== '0',

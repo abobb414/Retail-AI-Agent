@@ -47,11 +47,14 @@ node --experimental-strip-types scripts/test-image-model-tokens.mjs
 
 # 品牌标兜底的域名候选：防第三方站 favicon（smzdm / 京东 / 知乎）冒充品牌官方标
 node --experimental-strip-types scripts/test-brand-logo.mjs
+
+# 定品线路（主 + 备用）：顺序、超时、label 去重、质检跟随哪条线路
+node --experimental-strip-types scripts/test-llm-lines.mjs
 ```
 
-> `test-brand-logo.mjs` 会注册一个 `data:` URL 的 resolve 钩子，用来给源码里
-> **无扩展名**的相对导入补 `.ts` 后缀 —— 裸 Node 的 ESM 解析器不认这种写法
-> （`ERR_MODULE_NOT_FOUND`），而 Nuxt/Vite 认。所以它不能像另一个测试那样直接照抄导入方式。
+> `test-brand-logo.mjs` 与 `test-llm-lines.mjs` 会注册一个 `data:` URL 的 resolve 钩子，
+> 用来给源码里**无扩展名**的相对导入补 `.ts` 后缀 —— 裸 Node 的 ESM 解析器不认这种写法
+> （`ERR_MODULE_NOT_FOUND`），而 Nuxt/Vite 认。所以它们不能像另一个测试那样直接照抄导入方式。
 
 ## Visual & end-to-end probes
 
@@ -80,10 +83,16 @@ node scripts/system-test.mjs http://127.0.0.1:3100
 node scripts/system-test.mjs http://127.0.0.1:3100 --smoke
 
 # 兜底模式：对故障注入实例断言 engine=catalog
-# 先起一个 LLM 不可达的实例：
-#   LLM_BASE_URL=http://127.0.0.1:9/v1 HOST=127.0.0.1 PORT=3101 nuxt dev
+# ⚠️ 必须把**备用大模型线路也一起摘掉**，否则请求会被它接住，永远落不到 Worker。
+#    2026-10-02 起存在第二条 LLM 线路（LLM_FALLBACK_*），所以「让大模型不可用」
+#    这件事现在要两条一起断：主线路 + 备用线路都不通，才是真正的 catalog 路径。
+#    先起一个两条 LLM 线路都不可达的实例：
+#   LLM_BASE_URL=http://127.0.0.1:9/v1 LLM_FALLBACK_API_KEY= HOST=127.0.0.1 PORT=3101 nuxt dev
 node scripts/system-test.mjs http://127.0.0.1:3101 --fallback
 ```
 
 退出码 0 = 全部通过；失败项会逐条列出。S4/S7 之外的场景不依赖具体模型，
 换模型、换供应商后可直接复跑。
+
+> 顺带一提：三层可用性现在是「主线路 LLM → 备用线路 LLM（换出口）→ Worker 商品库（换数据源）」。
+> 只有**三层同时**不可用才返回 503，错误文案里会把三条路各自的原因都列出来。
