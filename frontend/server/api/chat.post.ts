@@ -4,6 +4,7 @@ import {
   describeSearchSource,
   hasLlmProvider,
   toLlmRecommendation,
+  type LlmProductLockedEvent,
 } from '../utils/llmBuyer'
 
 interface IncomingMessage {
@@ -69,8 +70,64 @@ function getLatestUserText(messages: IncomingMessage[]) {
 }
 
 function writeEvent(event: H3Event, name: string, data: unknown) {
-  event.node.res.write(`event: ${name}\n`)
-  event.node.res.write(`data: ${JSON.stringify(data)}\n\n`)
+  const res = event.node.res
+
+  // 客户端断开后继续 write 会抛 ERR_STREAM_DESTROYED。SSE 是「尽力送达」：
+  // 写不进去就不写，但**这个异常绝不能把降级逻辑（乃至兜底链路）带崩**。
+  if (res.writableEnded || res.destroyed) {
+    return
+  }
+
+  try {
+    res.write(`event: ${name}\n`)
+    res.write(`data: ${JSON.stringify(data)}\n\n`)
+  } catch (error) {
+    console.warn(
+      '[chat] 事件写入失败（客户端可能已断开）：',
+      error instanceof Error ? error.message : String(error),
+    )
+  }
+}
+
+/**
+ * SSE 心跳间隔。
+ *
+ * 2026-10-02 实测出来的必要性：定品链路从 0.5s 发完等待态到最终产出，
+ * 中间 **30~58s 一个字节都不发**。这段时间里连接在跨境链路上被中间设备
+ * 随机 RST（实测 31.9s / 38.0s / 46.1s 都出现过），前端读到一半就报
+ * `network error` —— 而后端其实是跑完了的，东西全烂在路上。
+ * 5s 一次的空注释行不改变协议语义（前端与测试脚本都会跳过无 event/data 的块），
+ * 但它让连接「一直在动」，也顺带顶掉各种代理的空闲回收。
+ */
+const SSE_HEARTBEAT_MS = 5_000
+
+/** 空注释行是 SSE 标准里合法的「心跳」，客户端会直接忽略。 */
+function writeHeartbeat(event: H3Event) {
+  const res = event.node.res
+
+  if (res.writableEnded || res.destroyed) {
+    return
+  }
+
+  try {
+    res.write(': ping\n\n')
+  } catch {
+    // 连接不可写：交给后续写事件时的守卫处理。
+  }
+}
+
+/**
+ * 大模型没给正文时的占位话术。
+ *
+ * 「先出的文字」是这一轮唯一的即时反馈，不能是空的 —— 那等于白改。
+ */
+function lockedFallbackText(locked: LlmProductLockedEvent) {
+  if (locked.action === 'recommend' && locked.product) {
+    const name = [locked.product.brand, locked.product.name].filter(Boolean).join(' ')
+    return name ? `我建议先看这一款：${name}。` : '我给你锁定了一款，卡片马上来。'
+  }
+
+  return '再多说一句你的使用场景，我好给你定一款。'
 }
 
 /** 只保留有内容的对话轮次，供大模型读取上下文。 */
@@ -297,15 +354,49 @@ async function runLlmPrimary(
     return { handled: false, reason: '对话历史为空' }
   }
 
+  /** 定品结论是否已经提前下发过（下发过就不再重发同一段文字与同一份 meta）。 */
+  let announced = false
+
   try {
-    const outcome = await decideProductWithLlm(config, history)
+    const outcome = await decideProductWithLlm(config, history, {
+      /**
+       * ── 先出文字，卡片后补（2026-10-02 的改造）──────────────────
+       *
+       * 定品一完成就回调，此刻图片还没找。后面还有来源核验 + 四级取图 +
+       * 视觉质检，实测还要 10~40s；原来这段时间 SSE 一个字节都不发，
+       * 用户看到的是「没反应」，连接还极容易被中间设备掐断。
+       * 现在把结论先发出去：用户十几秒内就有话可读，卡片等图齐了再补。
+       */
+      onProductLocked: (locked) => {
+        announced = true
+
+        writeEvent(event, 'chunk', { text: locked.chatReply || lockedFallbackText(locked) })
+        writeEvent(event, 'meta', {
+          mode: 'llm',
+          engine: 'llm' satisfies Engine,
+          model: locked.provider,
+          stage: locked.action === 'recommend' ? 'rag_recommendation' : 'clarify_slots',
+          latency_ms: locked.latencyMs,
+          searched: locked.searched,
+          search_queries: locked.searchQueries,
+          search_source: describeSearchSource(config),
+          profile_summary: [],
+        })
+      },
+    })
 
     if (outcome.action === 'recommend' && outcome.locked_product) {
       const recommendation = toLlmRecommendation(outcome.locked_product)
 
-      writeEvent(event, 'chunk', {
-        text: outcome.chat_reply || `我建议先看这款：${recommendation.brand} ${recommendation.name}。`,
-      })
+      // 兜底路径（结论没提前发过）才需要在这里补文字。
+      if (!announced) {
+        writeEvent(event, 'chunk', {
+          text: outcome.chat_reply || `我建议先看这款：${recommendation.brand} ${recommendation.name}。`,
+        })
+      }
+
+      // ── 卡片后补 ──────────────────────────────────────────────
+      // 到这一步卡片才带得动图片与来源链接，所以在这里才发 product。
       writeEvent(event, 'product', { product: recommendation })
       writeEvent(event, 'meta', {
         mode: 'llm',
@@ -325,20 +416,23 @@ async function runLlmPrimary(
       return { handled: true }
     }
 
-    writeEvent(event, 'chunk', {
-      text: outcome.chat_reply || '再多说一句你的使用场景，我好给你定一款。',
-    })
-    writeEvent(event, 'meta', {
-      mode: 'llm',
-      engine: 'llm' satisfies Engine,
-      model: outcome.provider,
-      stage: 'clarify_slots',
-      latency_ms: outcome.latencyMs,
-      searched: outcome.searched,
-      search_queries: outcome.searchQueries,
-      search_source: describeSearchSource(config),
-      profile_summary: [],
-    })
+    // 追问：文字与 meta 已经提前发过时，这里只补一个收尾事件。
+    if (!announced) {
+      writeEvent(event, 'chunk', {
+        text: outcome.chat_reply || '再多说一句你的使用场景，我好给你定一款。',
+      })
+      writeEvent(event, 'meta', {
+        mode: 'llm',
+        engine: 'llm' satisfies Engine,
+        model: outcome.provider,
+        stage: 'clarify_slots',
+        latency_ms: outcome.latencyMs,
+        searched: outcome.searched,
+        search_queries: outcome.searchQueries,
+        search_source: describeSearchSource(config),
+        profile_summary: [],
+      })
+    }
     writeEvent(event, 'done', { source: 'llm_primary' })
 
     return { handled: true }
@@ -420,6 +514,8 @@ export default defineEventHandler(async (event) => {
   event.node.res.setHeader('Cache-Control', 'no-cache')
   event.node.res.setHeader('Connection', 'keep-alive')
   event.node.res.setHeader('Content-Type', 'text/event-stream; charset=utf-8')
+  // 明确告诉路上任何一层反向代理「别缓冲」，否则 SSE 会被攒成一坨再吐。
+  event.node.res.setHeader('X-Accel-Buffering', 'no')
 
   if (!latestUserText) {
     writeEvent(event, 'chunk', { text: '你可以告诉我想找的品类、预算或使用场景，我再帮你挑一款。' })
@@ -428,7 +524,13 @@ export default defineEventHandler(async (event) => {
     return
   }
 
+  /** 心跳定时器。放在 try 外面是为了在 finally 里一定能清掉（serverless 里漏掉会一直吊着实例）。 */
+  let heartbeat: ReturnType<typeof setInterval> | undefined
+
   try {
+    // 定品要花十几到几十秒，全程只有心跳在动 —— 见 SSE_HEARTBEAT_MS 的说明。
+    heartbeat = setInterval(() => writeHeartbeat(event), SSE_HEARTBEAT_MS)
+
     // ── 首选：大模型亲自定品 ──────────────────────────────────
     // 推理/大模型一次定品要几秒到几十秒，先给前端一个等待态，别让用户干等。
     if (hasLlmProvider(config)) {
@@ -492,6 +594,9 @@ export default defineEventHandler(async (event) => {
       message: error instanceof Error ? error.message : '顾问服务暂时不可用。',
     })
   } finally {
+    if (heartbeat) {
+      clearInterval(heartbeat)
+    }
     event.node.res.end()
   }
 })

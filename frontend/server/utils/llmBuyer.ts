@@ -23,6 +23,7 @@ import { withTransportRetry } from './transport'
 import {
   getSearchProviderLabel,
   hasSearchProvider,
+  isSearchLinkDown,
   searchWeb,
   type SearchImage,
   type WebSearchHit,
@@ -67,6 +68,36 @@ export interface LlmBuyerOutcome {
   sourceVerified: boolean
   /** 商品图是怎么来的：模型来源页 og:image / 官方候选页 og:image / 模型自带的官方图 / 无。 */
   imageFrom: ImageFrom
+}
+
+/**
+ * 「定品结论」提前下发的回调载荷。
+ *
+ * 为什么要有这一层（2026-10-02 的教训）：
+ * 定品一旦完成，后面还有来源核验 + 四级取图 + 视觉质检，实测还要 **10~40s**。
+ * 这段时间里 SSE 一个字节都不发 —— 用户看到的是「没反应」，而且长时间静默的
+ * 连接在跨境链路上极容易被中间设备掐断（实测 30~58s 之间被 RST，前端表现为
+ * `network error`，与后端逻辑无关）。所以把「结论」和「配图」拆开：
+ * 结论一到就发文字，图找好了再补卡片。
+ */
+export interface LlmProductLockedEvent {
+  action: 'clarify' | 'recommend'
+  chatReply: string
+  product: LlmLockedProduct | null
+  provider: string
+  /** 大模型做出判断花了多久（不含后面的取图与质检）。 */
+  latencyMs: number
+  searchQueries: string[]
+  searched: boolean
+}
+
+export interface LlmBuyerHooks {
+  /**
+   * 定品结论一到就回调（此刻图片还没找）。
+   * 一次 decideProductWithLlm 里**最多触发一次** —— 触发之后即便取图阶段抛错，
+   * 也不会回头重试别的 provider（用户已经看到卡片了，重来一遍更糟）。
+   */
+  onProductLocked?: (event: LlmProductLockedEvent) => void
 }
 
 interface ChatTurn {
@@ -1169,8 +1200,14 @@ async function callProvider(
   let images: SearchImage[] = []
   const timings: Record<string, number> = {}
 
-  // ── 阶段一：联网侦察（仅在配置了搜索源时启用）────────────────
-  if (hasSearchProvider(config)) {
+  // ── 阶段一：联网侦察（仅在配置了搜索源、且搜索链路还能通时启用）────
+  // 搜索链路已被熔断时整段跳过：那一轮「让模型决定搜什么」的调用没有任何意义，
+  // 只会白等几秒（见 webSearch.ts 的 SEARCH_BREAKER_COOLDOWN_MS）。
+  if (hasSearchProvider(config) && isSearchLinkDown()) {
+    console.warn('[llmBuyer] 搜索链路熔断中，跳过联网侦察，本轮凭模型自身知识定品')
+  }
+
+  if (hasSearchProvider(config) && !isSearchLinkDown()) {
     const reconStartedAt = Date.now()
     const recon = await runSearchRecon(provider, messages, config, timeoutMs)
     timings.reconMs = Date.now() - reconStartedAt
@@ -1254,6 +1291,7 @@ function normalizeProduct(raw: unknown): LlmLockedProduct | null {
 export async function decideProductWithLlm(
   config: ReturnType<typeof useRuntimeConfig>,
   history: ChatTurn[],
+  hooks: LlmBuyerHooks = {},
 ): Promise<LlmBuyerOutcome> {
   const providers = resolveProviders(config)
 
@@ -1271,6 +1309,11 @@ export async function decideProductWithLlm(
     }
 
     const startedAt = Date.now()
+    /** 已经下发给调用方的定品结论；非空即表示「用户那边已经看到东西了」。 */
+    let delivered: LlmProductLockedEvent | null = null
+    /** 取图阶段的进展。放在 try 外面是为了「已下发后异常收口」时能如实上报。 */
+    let sourceVerified = false
+    let imageFrom: ImageFrom = 'none'
 
     try {
       const { payload, queries, hits, images, timings } = await callProvider(provider, history, timeoutMs, config)
@@ -1291,8 +1334,30 @@ export async function decideProductWithLlm(
       // 真去抓一次页面，可达才保留链接，og:image 才拿来当商品图。
       // 这层不抛错——核验失败只影响图片与链接，不该拖垮整次定品。
       const llmLatencyMs = Date.now() - startedAt
-      let sourceVerified = false
-      let imageFrom: ImageFrom = 'none'
+
+      // ── 结论先发，配图后补 ──────────────────────────────────
+      // 判断已经做完，后面的取图与视觉质检还要十几到几十秒（见 IMAGE_PHASE_BUDGET_MS）。
+      // 把结论交给调用方先发出去：用户立刻有东西可读，连接也不用靠「一个字节都不发」
+      // 硬撑过那段最容易被中间设备掐掉的静默期。
+      delivered = {
+        action,
+        chatReply,
+        product: action === 'recommend' ? product : null,
+        provider: provider.label,
+        latencyMs: llmLatencyMs,
+        searchQueries: queries,
+        searched: hits.length > 0,
+      }
+
+      try {
+        hooks.onProductLocked?.(delivered)
+      } catch (hookError) {
+        // 下发失败（比如连接已经断了）不该影响定品本身。
+        console.warn(
+          '[llmBuyer] 提前下发定品结论失败，忽略：',
+          hookError instanceof Error ? hookError.message : String(hookError),
+        )
+      }
 
       if (action === 'recommend' && product) {
         const probeStartedAt = Date.now()
@@ -1556,6 +1621,29 @@ export async function decideProductWithLlm(
         imageFrom,
       }
     } catch (error) {
+      // 结论已经下发给用户了 ⇒ 不能再来一遍（用户会看到两段文案、两张卡片）。
+      // 这时把**已经发出去的那份**原样收口：图没找完就算了，整条链路不该因此失败。
+      // 这也顺带绕开了「取图阶段抛错 → 降级到商品库 → 用户手里的卡片被换掉」的怪象。
+      if (delivered) {
+        noteSuccess(provider.label)
+        console.warn(
+          `[llmBuyer] ${provider.label} 取图阶段异常，但定品结论已下发，按现状收口（imageFrom=${imageFrom}）：`,
+          error instanceof Error ? error.message : String(error),
+        )
+
+        return {
+          action: delivered.action,
+          chat_reply: delivered.chatReply,
+          locked_product: delivered.product,
+          provider: delivered.provider,
+          latencyMs: delivered.latencyMs,
+          searchQueries: delivered.searchQueries,
+          searched: delivered.searched,
+          sourceVerified,
+          imageFrom,
+        }
+      }
+
       noteFailure(provider.label)
       errors.push(error instanceof Error ? error.message : String(error))
     }

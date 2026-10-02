@@ -15,7 +15,7 @@
  * 且支持 include_images（可顺带解决商品配图）。
  */
 
-import { withTransportRetry } from './transport'
+import { describeTransportError, withTransportRetry } from './transport'
 
 export interface WebSearchHit {
   title: string
@@ -62,6 +62,63 @@ export interface WebSearchOutcome {
  */
 const SEARCH_TIMEOUT_MS = 25_000
 const MAX_HITS_PER_QUERY = 5
+
+/**
+ * 搜索链路的进程内熔断。
+ *
+ * ── 为什么需要它（2026-10-02 在 Vercel 上实测）──────────────────────
+ * 从部署区域 hkg1 连 `api.tavily.com:443` 会**连接超时**，而 undici 的
+ * connect timeout 是写死的 10s，日志形态：
+ * ```
+ * [transport] tavily:xxx 传输层失败但已耗时 10455ms（≥5000ms），判定为链路不通，不再重试：
+ *   fetch failed / Connect Timeout Error (attempted address: api.tavily.com:443, timeout: 10000ms) / UND_ERR_CONNECT_TIMEOUT
+ * ```
+ * 8 次请求里出现了 7 次 —— 也就是几乎每个请求都白等 10s。这 10s 买不到任何东西：
+ * 连接都建不起来，说明是链路不通，不是上游在思考，重复尝试不可能变好。
+ *
+ * 所以这里做一层「一次不通就歇一会儿」的熔断：省下的不只是 10s，
+ * 还有用户在静默的 SSE 连接上多暴露的那 10s（见 chat.post.ts 的心跳注释）。
+ * 熔断期间 `searchWeb` 直接快速失败，调用方本来就把检索失败当「降级到凭模型知识定品」处理。
+ */
+const SEARCH_BREAKER_COOLDOWN_MS = Number(process.env.SEARCH_BREAKER_COOLDOWN_MS || 60_000)
+let searchDownUntil = 0
+
+/** 连接级失败 = 连都没连上，属于链路不通而不是上游忙。 */
+function isConnectLevelFailure(error: unknown) {
+  const message = describeTransportError(error).toLowerCase()
+
+  return (
+    message.includes('connect timeout') ||
+    message.includes('und_err_connect_timeout') ||
+    message.includes('etimedout') ||
+    message.includes('ehostunreach') ||
+    message.includes('enetunreach')
+  )
+}
+
+function noteSearchDown(reason: string) {
+  searchDownUntil = Date.now() + SEARCH_BREAKER_COOLDOWN_MS
+  console.warn(
+    `[search] 搜索链路判定不通，${Math.round(SEARCH_BREAKER_COOLDOWN_MS / 1000)}s 内不再尝试（避免每次白等 10s 连接超时）：${reason}`,
+  )
+}
+
+/** 供测试清理熔断状态。 */
+export function resetSearchBreaker() {
+  searchDownUntil = 0
+}
+
+/**
+ * 搜索链路当前是否被判定为不通。
+ *
+ * 调用方用它**跳过整个侦察阶段**：检索已经证明不可达时，连「让模型决定搜什么」
+ * 那一轮大模型调用（实测 2~8s）也是白花的 —— 工具调出来也搜不到东西。
+ * 跳过之后模型退回「凭自身知识定品」，这正是没配搜索源时的既有路径。
+ */
+export function isSearchLinkDown() {
+  return Date.now() < searchDownUntil
+}
+
 /**
  * 中文站点优先，减少英文站噪声；Tavily 对这条参数是软过滤。
  * 踩坑：这里必须写**国家全名**的小写形式，写 ISO 码（zh / CN）会直接 400
@@ -228,6 +285,14 @@ export async function searchWeb(
     throw new Error('未配置搜索数据源（TAVILY_API_KEY）')
   }
 
+  // 熔断期内直接快速失败：检索是「可有可无」的一路，不该让用户陪着等一个
+  // 已经证明不通的连接超时（见 SEARCH_BREAKER_COOLDOWN_MS）。
+  const downForMs = searchDownUntil - Date.now()
+
+  if (downForMs > 0) {
+    throw new Error(`搜索链路熔断中（还有 ${Math.ceil(downForMs / 1000)}s 恢复），本轮跳过检索`)
+  }
+
   const errors: string[] = []
 
   for (const provider of providers) {
@@ -241,6 +306,10 @@ export async function searchWeb(
       }
     } catch (error) {
       errors.push(error instanceof Error ? error.message : String(error))
+
+      if (provider.label === 'tavily' && isConnectLevelFailure(error)) {
+        noteSearchDown(describeTransportError(error))
+      }
     }
   }
 
