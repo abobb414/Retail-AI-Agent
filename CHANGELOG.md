@@ -2,6 +2,73 @@
 
 本文档记录 `Retail-AI-Agent` 的重要迭代。
 
+## [2026-10-08] — 品牌锁合提到整页左上角 + 卡片外围上下留白配平 + 页脚版权
+
+用户原话（本次唯一需求来源，按先后顺序）：
+
+> retail ai agent这上面这条删掉吧。给我改成这样左上角的品牌logo，图标就用这个彩色的 favicon，
+> https://start.abobb.site/，logo 的大小位置严格对照这个网页
+>
+> 我的意思是弄到整个页面的左上角不是框内的左上角，第一句对话覆盖现在那个 log 的位置，框内的上面不用遮挡了
+>
+> 上下间隙登高，最下面标注一下版权信息
+>
+> 对话框上下的间隙宽度要相等，版权信息把我加进去
+>
+> 我说的对话框外围的上下边距的宽度要相等
+
+拆成三件事，逐条落地。
+
+### 1. 原头部 wordmark 删掉，换成 start.abobb.site 规格的品牌锁合
+
+- 删除原绿色斜体 `Retail AI Agent` wordmark（`<p class="wordmark">` 三段式 span）及其全部 CSS 与移动端断点。
+- 新锁合 = **彩色机器人图标 + `Retail AI Agent` + `shopping concierge`**，规格逐项对齐 start 的 `.brand` / `.brand-mark` / `.brand-copy`：
+  图标 **28×28**、图标↔文字间距 **10px**、品牌名 **14px / 700 / letter-spacing .02em**、小字 **10px / 500 / letter-spacing .04em / 上间距 4px**。
+- 图标素材用 `assets/icons/favicon-robot.svg` —— 这是标签页 favicon 的**真矢量版**。
+  `public/favicon.svg` 只是 base64 PNG 包壳（`<image>` 内嵌位图），缩放会糊，故不用。
+
+有意**未**照抄 start 的三处：① 头部左右留白仍走本页卡片自己的 `clamp(22px,5vw,76px)`（照搬 start 的 `clamp(22px,5vw,76px)` 数值相同但语义独立）；
+② 小字用站点 sans 字体（`main.css` 明令全站禁用等宽字体，start 那行是 DM Mono）；③ 品牌名取深灰 `#1f2d3d` 而非原绿色 `#58a57e`。
+
+### 2. 锁合从「卡片内」提到「整页左上角」
+
+- 新增页面级 `.page-topbar`（锁合 + 新会话按钮整体搬出卡片），卡片内那行 `<header class="shell-header">` 整块删除
+  ⇒ **卡片内不再有任何 header，第一句对话直接顶到卡片顶部**。
+- `.chat-page` 改 flex 纵向：`.page-topbar`(flex:none) → `.shell-area`(flex:1，装卡片) → `.page-footer`(flex:none)。
+- 卡片去掉 `h-[100dvh]` / `sm:h-[min(88vh,920px)]` 与 `mx-auto`，改 `flex-1 + min-h-0`。
+- 顺带修掉一个隐性 bug：卡片原来靠 Tailwind `mx-auto` 居中，变成 flex 子项后失效会**贴左**（实测 x=24），改成父级 `justify-content: center`。
+- `.entrance .entrance-header` 入场规则删除，动画改挂到 `.page-topbar` 上。
+
+### 3. 卡片外围上下留白配平 + 页脚版权
+
+一开始用「顶栏 padding 27px + `.shell-area` 零 padding」凑，实测锁合上下 27/27 但卡片外围仍不等；根因是页脚高度与顶栏不一致。
+
+最终做法：**顶栏与页脚等高，卡片夹中间**，留白由两侧高度自然决定。
+
+| | 锁合上下 | 卡片外围上/下 |
+| --- | --- | --- |
+| 桌面 1440×900（空态） | 27px / 27px | **84px / 84px** |
+| 桌面（有对话、「新会话」按钮出现） | 27px / 27px | **84px / 84px** |
+| 移动端 390×844 | 16px / 16px | **62px / 62px** |
+
+- `.page-topbar` 由 `padding: 27px …` 改为**固定 `height: 84px`**（= 27 + 锁合 30 + 27），内容垂直居中。
+  这样同时解决三个问题：① 锁合上下间隙恒为 27px；② 「新会话」按钮出现/消失**不再把顶栏从 84 撑到 92**（此前卡片会整体往下跳 8px）；③ 与页脚配平。
+- `.page-footer` 新增：`min-height: 84px`、文字垂直居中、`#93a0b0`、`11px`（走项目 `.ui-label` 令牌）、`letter-spacing .06em`、左右留白与顶栏同一套 `clamp(22px,5vw,76px)`。
+- 窄屏两者同步降到 **62px**（= 16 + 30 + 16）。
+- 版权文案：`© {{ year }} AlistairBo · Retail AI Agent · 保留所有权利`，年份用 `new Date().getFullYear()`。
+- 中间一度误改了 quick-prompt chips 的间距（`.mb-4 sm:mb-6`），已恢复为 `mb-3 gap-2` —— 用户指的是**卡片外围**留白，不是输入框内部。
+
+### 验证
+
+- 用 Playwright（`channel: 'chrome'`，1440×900 / 390×844，`deviceScaleFactor: 2`）实测 `getBoundingClientRect`：
+  锁合 `(72, 27)`、卡片 `84 → 816`、页脚 816→900，卡片外围 **84 / 84**，锁合上下 **27 / 27**，
+  `document.documentElement.scrollHeight === 900`（**整页一屏不滚**，`overflow = 0`）。
+- 移动端 390×844：顶栏 62px、锁合 `x=20`、首条消息 y=78 不被遮挡。
+- 空态 / 有对话（含「新会话」按钮）两态均复测，数值一致。
+- `npm run build` 干净通过，本地 `node .output/server/index.mjs` 预览验收后再发版。
+
+改动范围：仅 `frontend/pages/index.vue`（+159 / −79）。
+
 ## [2026-09-29 · 晚间] — 界面收敛：等待态只留三个点 + 移除服务来源徽章 + 全站字号统一
 
 用户原话（本次唯一需求来源）：
