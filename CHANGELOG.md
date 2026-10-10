@@ -2,6 +2,24 @@
 
 本文档记录 `Retail-AI-Agent` 的重要迭代。
 
+## [2026-10-10 · 深夜] — 启用 GitHub → Vercel 自动部署
+
+用户原话：
+
+> 挺好
+>
+> ok了完成sudo验证了
+
+依据：此前线上一直靠手动 `cd frontend && vercel --prod` 发版，`git push` 不会自动触发构建（曾出现「代码推了但线上还是旧版」的困扰）。
+
+改动（Vercel 项目 `abobb/frontend` 的配置，非代码）：
+
+- 连接 GitHub 仓库 `abobb414/Retail-AI-Agent`：GitHub App 授权 → 安装（选 Only select repositories，仅此一个仓库）→ 二次验证（sudo，由用户本人完成）。
+- **关键补配：Root Directory 设为 `frontend`**。仓库根没有 `package.json`，Nuxt 应用在 `frontend/` 子目录；若不设此项，Git 触发的构建会从仓库根开始、找不到应用而失败（手动 CLI 部署之所以正常，是因为在 `frontend/` 目录下执行、以该目录为根上传）。
+- Production Branch = `main`（域名 `retail.abobb.com` 已挂在 Production 环境）。
+
+验证：向 `main` 推送提交后，Vercel 自动触发 Production 构建（见下方部署记录）。
+
 ## [2026-10-10 · 夜] — 对话链路：工具调用协议标记泄漏进文案（工单 `2026-10-10-dialogue-bugfix-ticket.md`）
 
 用户原话：
@@ -28,6 +46,7 @@
 - 离线：`stripToolProtocol` 5 组用例（全角/半角纯协议、前置人话、闭合块后有人话、正常追问不变）+ `hasToolProtocol` / `sanitizeCopyText` 通过。
 - 既有回归：`test-net-guard.mjs` 61 例、`test-llm-lines.mjs` 13 例、`test-catalog-intent.mjs` 通过；`nuxi build` 通过、无 warning。
 - **未验证**：工单要求的「用例 01 连跑 ≥10 次零泄漏」与线上 30 例回归，需要真实大模型与外网，沙箱无法执行，待部署后跑。
+
 ## [2026-10-10 · 傍晚] — 收尾三件：HEAD 状态码改回 200、.gitignore 补缺口、根 Worker 首次发版
 
 用户原话：
