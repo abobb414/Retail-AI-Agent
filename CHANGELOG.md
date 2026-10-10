@@ -65,12 +65,39 @@ npx wrangler deploy
 | Worker `POST /api/chat` | **200**，返回澄清话术（未受影响） |
 | Nuxt 构建 | 通过、无 warning，产物含 `image.head.mjs` |
 
-> 小观察（非本次引入、不影响功能）：上游取图失败（`fdsports.com`）的 502 在线上返回的是 **Vercel 自带的 HTML 错误页**（无 CSP / nosniff），而本地返回我们自己的 JSON。那是平台静态错误页、不是上游内容，无安全影响，故未处理。
+### 4. 图片代理的错误不再走 h3 错误链，并把 502 / 504 折算成 503
+
+**先纠正上一条"小观察"的错误归因**：线上那个错误页**不是 Vercel 生成的**，也不是「Vercel 接管了错误链路」。实测证据：
+
+- 直连部署地址 `frontend-*-abobb.vercel.app` 拿到的**始终是我们自己的 JSON**（带 `x-vercel-id`）；
+- 只有走 `retail.abobb.com` / `retail.abobb.site` 才变成 16 字节纯文本 `error code: 502`，且**没有 `x-vercel-id`** —— 说明响应是在 **Cloudflare 那一层**被换掉的，Vercel 的响应根本没到客户端；
+- 用**同一个上游 httpbin 只换状态码**做对照（直连 vs 走域名）：**500 → 透传 ✅ ｜ 502 → 被替换 ❌ ｜ 503 → 透传 ✅ ｜ 504 → 被替换 ❌**。
+  → **替换只看状态码，与正文、响应头无关。**
+
+所以光把错误改成自己的 `Response` 还不够（该改动本身仍有价值：JSON 正文 + `nosniff` + CSP sandbox + `no-store`，不再泄露内部细节，也不再把上游 3xx 原样回给浏览器）。**两处改动**（`frontend/server/utils/imageProxy.ts`）：
+
+1. 代理内部的可预期失败改用 `ImageProxyError`，在 `handleImageRequest` 出口统一转成我们自己的 `Response`，不再抛 h3 错误（与 HEAD 成功路径走同一条已验证通道）。
+2. 新增 `clientStatus()`，出口把 **502 / 504 折算成 503** —— 语义仍是「服务端暂时无法完成这次取图」，但能活着到达客户端，从而带得上我们的 JSON 与安全头。
+
+**验证（线上实测：域名链路 vs 直连 Vercel 逐项对照，8/8 状态码完全一致）**：
+
+| 场景 | 走域名 | 直连 Vercel | 响应头 |
+|---|---|---|---|
+| 成功取图 | 200（11404 字节真图） | 200 | `image/jpeg` + nosniff + CSP sandbox |
+| `fdsports.com` fetch 失败 | **503**（原 502，会被 CF 换成错误页） | 503 | `application/json` + nosniff + CSP sandbox + `no-store` |
+| 上游 500 | 500 | 500 | 同上 |
+| 上游 502 | **503**（折算） | 503 | 同上 |
+| 上游 503 | 503 | 503 | 同上 |
+| 上游 504 | **503**（折算） | 503 | 同上 |
+| 缺 url | 400 | 400 | 同上 |
+| 非图片 | 415 | 415 | 同上 |
+| HEAD 成功取图 | 200、0 字节 | 200 | 同 GET |
+
+所有响应均带 `x-vercel-id`，即**全部由 Vercel 发出、链路不再替换任何一档**。Nuxt 构建通过、无 warning。
 
 ### 本次未处理
 
 - **SSRF 守卫只看主机名与字面 IP，不做 DNS 解析** —— 同前，仍未闭合。
-- `docs/multimodal_retail_agent_architecture.md` 仍是未跟踪状态（入库还是忽略待定）。
 
 ## [2026-10-10 · 下午] — 安全加固收尾：SVG 代理进沙箱 + SSE 状态码守卫 + SSRF 回归测试落盘
 

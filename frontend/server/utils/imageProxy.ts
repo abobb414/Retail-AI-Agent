@@ -2,6 +2,18 @@ import { isBlockedHost } from './netGuard'
 
 const MAX_REDIRECTS = 3
 
+/**
+ * 代理内部的可预期失败（参数非法、SSRF 拦截、上游不通……）。
+ *
+ * 不用 h3 的 createError：那条错误链路在线上会被平台接管，回一个 Vercel 自带的 HTML 错误页，
+ * 没有我们的 nosniff / CSP 头。这里改为在 handleImageRequest 的出口统一转成自己的 Response。
+ */
+class ImageProxyError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message)
+  }
+}
+
 function getImageRequestHeaders(parsedUrl: URL) {
   const hostname = parsedUrl.hostname.toLowerCase()
   const headers: Record<string, string> = {
@@ -24,7 +36,7 @@ function getImageRequestHeaders(parsedUrl: URL) {
 
 function assertFetchableUrl(url: URL) {
   if (!['http:', 'https:'].includes(url.protocol) || isBlockedHost(url.hostname)) {
-    throw createError({ statusCode: 400, statusMessage: 'Image url is not allowed' })
+    throw new ImageProxyError(400, 'Image url is not allowed')
   }
 }
 
@@ -53,7 +65,7 @@ async function fetchImage(initialUrl: URL, method: 'GET' | 'HEAD') {
         })
       }
     } catch {
-      throw createError({ statusCode: 502, statusMessage: 'Unable to fetch image' })
+      throw new ImageProxyError(502, 'Unable to fetch image')
     }
 
     const location = response.headers.get('location')
@@ -66,41 +78,68 @@ async function fetchImage(initialUrl: URL, method: 'GET' | 'HEAD') {
     assertFetchableUrl(currentUrl)
   }
 
-  throw createError({ statusCode: 502, statusMessage: 'Too many redirects' })
+  throw new ImageProxyError(502, 'Too many redirects')
 }
 
 /**
- * GET 与 HEAD 共用的图片代理逻辑。
+ * 502 / 504 在这条域名链路上**到不了客户端**：会被 Cloudflare 换成它自己的纯文本页
+ * `error code: 502` / `error code: 504`（16 字节、无 nosniff、无我们的 JSON，连 `x-vercel-id`
+ * 都没有）。实测方式：同一上游 httpbin 只换状态码，对比「直连 Vercel 部署地址」与
+ * 「走 retail.abobb.com」——
  *
- * HEAD 返回与 GET 相同的状态码（200）与响应头，但不输出正文 ——
- * 上游 body 显式 `cancel()`，再回一个 200 的空 Response。
+ *   上游 500 → 两边都是我们的 JSON（透传 ✅）
+ *   上游 502 → 直连是我们的 JSON，走域名变成 `error code: 502`（被替换 ❌）
+ *   上游 503 → 两边都是我们的 JSON（透传 ✅）
+ *   上游 504 → 直连是我们的 JSON，走域名变成 `error code: 504`（被替换 ❌）
+ *
+ * 也就是说：**替换只看状态码，跟正文/头部无关**，所以光把错误改成自己的 Response 还不够。
+ * 出口统一把 502 / 504 折算成 503 —— 语义仍是「服务端暂时无法完成这次取图」，
+ * 但能活着到达客户端，也就带得上我们的 JSON 与安全头。
  */
-export async function handleImageRequest(event: H3Event, method: 'GET' | 'HEAD') {
+function clientStatus(status: number) {
+  return status === 502 || status === 504 ? 503 : status
+}
+
+/** 错误响应：自带 nosniff / CSP sandbox，不缓存；HEAD 不输出正文。 */
+function errorResponse(status: number, message: string, method: 'GET' | 'HEAD') {
+  return new Response(method === 'HEAD' ? null : JSON.stringify({ error: message }), {
+    status: clientStatus(status),
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Security-Policy': 'sandbox',
+      'Cache-Control': 'no-store',
+    },
+  })
+}
+
+async function proxyImage(event: H3Event, method: 'GET' | 'HEAD') {
   const rawUrl = getQuery(event).url
   const imageUrl = Array.isArray(rawUrl) ? rawUrl[0] : rawUrl
 
   if (!imageUrl) {
-    throw createError({ statusCode: 400, statusMessage: 'Missing image url' })
+    throw new ImageProxyError(400, 'Missing image url')
   }
 
   let parsedUrl: URL
   try {
     parsedUrl = new URL(imageUrl)
   } catch {
-    throw createError({ statusCode: 400, statusMessage: 'Invalid image url' })
+    throw new ImageProxyError(400, 'Invalid image url')
   }
   assertFetchableUrl(parsedUrl)
 
   const response = await fetchImage(parsedUrl, method)
 
   if (!response.ok || (method === 'GET' && !response.body)) {
-    throw createError({ statusCode: response.status || 502, statusMessage: 'Unable to fetch image' })
+    // 上游 3xx 落到这里时不能把 3xx 原样回给浏览器，统一折算成 502。
+    throw new ImageProxyError(response.status >= 400 ? response.status : 502, 'Unable to fetch image')
   }
 
   // 这个接口是公开代理：只放行图片。否则 /api/image?url=<攻击者页面> 会在我们的域名下输出 text/html。
   const upstreamType = (response.headers.get('content-type') || '').toLowerCase()
   if (upstreamType && !upstreamType.startsWith('image/') && !upstreamType.startsWith('application/octet-stream')) {
-    throw createError({ statusCode: 415, statusMessage: 'Upstream is not an image' })
+    throw new ImageProxyError(415, 'Upstream is not an image')
   }
 
   setHeader(event, 'Content-Type', upstreamType || 'image/jpeg')
@@ -127,4 +166,23 @@ export async function handleImageRequest(event: H3Event, method: 'GET' | 'HEAD')
   }
 
   return response.body
+}
+
+/**
+ * GET 与 HEAD 共用的图片代理入口。
+ *
+ * 所有出口都返回 Response（成功或错误），不再向外抛 H3 错误，见 ImageProxyError 的说明。
+ */
+export async function handleImageRequest(event: H3Event, method: 'GET' | 'HEAD') {
+  try {
+    return await proxyImage(event, method)
+  } catch (error) {
+    if (error instanceof ImageProxyError) {
+      return errorResponse(error.status, error.message, method)
+    }
+
+    // 未预料的异常：记日志，对外仍只给一个通用 502，不泄露内部细节。
+    console.warn('[image] 图片代理异常：', error instanceof Error ? error.message : String(error))
+    return errorResponse(502, 'Unable to fetch image', method)
+  }
 }
