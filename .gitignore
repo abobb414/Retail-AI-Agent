@@ -15,6 +15,10 @@ backend/**/*.pyc
 !.env.example
 !frontend/.env.example
 
+# 本地工具 / 会话数据目录（属于项目数据，**只忽略、不删除**）
+.workbuddy/
+.claude/
+
 frontend/.run/
 .vercel/
 .vercel-local-page.png

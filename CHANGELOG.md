@@ -2,6 +2,76 @@
 
 本文档记录 `Retail-AI-Agent` 的重要迭代。
 
+## [2026-10-10 · 傍晚] — 收尾三件：HEAD 状态码改回 200、.gitignore 补缺口、根 Worker 首次发版
+
+用户原话：
+
+> 根 Worker 还没发版 …… 真要发 Worker，必须先 npx wrangler secret put INGEST_TOKEN，否则导入脚本会被 403 挡。要不要一起发，你说。
+>
+> 另外那个 .gitignore 缺口还在（.workbuddy/ + .claude/ 未忽略）
+>
+> 然后我来改 + 重部署 + 复测 + 提交（推荐）—— 一步到位，CHANGELOG 里把 204 这个平台差异也记下来
+>
+> 一起收尾
+
+### 1. `/api/image` 的 HEAD 从 204 改回 200 —— 修掉一个只在 Vercel 上出现的差异
+
+上一轮为 `/api/image` 注册了 HEAD 路由（`image.head.ts`），但**线上返回的是 204，且 `Content-Type` 被剥掉**；同一个 URL 在本地 `node .output/server/index.mjs` 下是 204 **但带** `Content-Type`。即：「HEAD 返回与 GET 相同的响应头」这条在线上只做到了 3/4。
+
+根因在 h3 v1.15 的 `sendNoContent()`：
+
+```js
+if (!code && event.node.res.statusCode !== 200) code = event.node.res.statusCode;
+const _code = sanitizeStatusCode(code, 204);        // ← 没传 code 时恒落 204
+```
+
+`handleHandlerResponse` 对 `null` 返回是直接调 `sendNoContent(event)`（不带 code），于是**无论前面把状态码设成什么，结果都是 204** —— 所以「先 `setResponseStatus(200)` 再 `return null`」这条路是死的（实测确实仍是 204）。而 204「不带实体」在 **Vercel 边缘会被顺手剥掉 `Content-Type`**，本地 Node adapter 不剥，**所以这个差异本地怎么测都测不出来，只能线上 `curl -I` 发现**。
+
+改法：`return new Response(null, { status: 200 })` —— 走 `sendWebResponse` 分支，它不清 header、照写状态码、空 body 直接 `res.end()`。顺带满足 RFC 9110「HEAD 的状态码应与 GET 一致」（原先 204 vs 200）。
+
+### 2. `.gitignore` 补 `.workbuddy/` 与 `.claude/`
+
+两者长期以 `??` 挂在 `git status` 下（`.workbuddy/` 里还有 memory、一次性备份 patch、一批验收截图），有误提交风险。加两行忽略即可。`.workbuddy/` 是项目数据目录，**只忽略、绝不删除**。
+
+### 3. 根 Worker 首次发版 —— 入库鉴权这才真正生效
+
+`index.ts` 的入库鉴权写在 `3acc954`，但 Worker 走 wrangler 独立发版，**之前从来没发出去过**。发版前线上探测可确认：无 token 的 `POST /api/ingest` 返回的是 body 校验的 `400`（旧代码的行为），鉴权等于不存在。
+
+严格按「**先配 secret、再发版**」的顺序执行（顺序反了等于把入库接口关掉，因为新代码在 `INGEST_TOKEN` 未配置时整体 403）：
+
+```bash
+printf '%s' '<token>' | npx wrangler secret put INGEST_TOKEN
+npx wrangler deploy
+```
+
+`wrangler deploy` 输出：`Total Upload 80.42 KiB`、Version ID `48fa5e53-85bb-42f6-975f-d1498c93418f`，绑定 `DB` / `VECTOR_INDEX` / `AI` 三个。
+
+口令值已写入仓库根 `.env`（该文件在 `.gitignore` 内，不入库），供 `scripts/import-real-products.mjs` 使用。
+
+### 验证（全部线上实测）
+
+| 项 | 结果 |
+|---|---|
+| `HEAD /api/image?url=<真实外链图>` | **200** + `content-type: image/jpeg` + CSP sandbox + nosniff + cache-control，正文 **0 字节** |
+| HEAD 与 GET 的四个响应头逐项比对 | **完全一致**（本地 + 线上各跑一遍） |
+| `GET /api/image?url=<真实外链图>` | 200，10467 字节真图 |
+| 缺 url / 云元数据 `169.254.169.254` | GET 与 HEAD **均 400** |
+| 非图片 `example.com` | 均 **415** |
+| `fdsports.com`（不得误拦） | 均 **502** |
+| 线上 SSE `POST /api/chat` 端到端 | ✅ `meta(thinking)` → `chunk` → `meta(rag_recommendation, model=deepseek-v4.1-flash, latency_ms=27312, source=tavily)` → `product`（李宁 赤兔 7 PRO）→ `done{source: llm_primary}` |
+| Worker `POST /api/ingest` 无 token / 错 token | **401**（`Invalid ingest token.`） |
+| Worker `POST /api/ingest` 正确 token + 空数组 | **400**（`Request body must contain at least one product.`）→ 证明鉴权已放行、且不写库 |
+| Worker `POST /api/ingest` GET | **405** |
+| Worker `POST /api/chat` | **200**，返回澄清话术（未受影响） |
+| Nuxt 构建 | 通过、无 warning，产物含 `image.head.mjs` |
+
+> 小观察（非本次引入、不影响功能）：上游取图失败（`fdsports.com`）的 502 在线上返回的是 **Vercel 自带的 HTML 错误页**（无 CSP / nosniff），而本地返回我们自己的 JSON。那是平台静态错误页、不是上游内容，无安全影响，故未处理。
+
+### 本次未处理
+
+- **SSRF 守卫只看主机名与字面 IP，不做 DNS 解析** —— 同前，仍未闭合。
+- `docs/multimodal_retail_agent_architecture.md` 仍是未跟踪状态（入库还是忽略待定）。
+
 ## [2026-10-10 · 下午] — 安全加固收尾：SVG 代理进沙箱 + SSE 状态码守卫 + SSRF 回归测试落盘
 
 用户原话：
