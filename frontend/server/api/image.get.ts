@@ -86,6 +86,13 @@ export default defineEventHandler(async (event) => {
 
   setHeader(event, 'Content-Type', upstreamType || 'image/jpeg')
   setHeader(event, 'X-Content-Type-Options', 'nosniff')
+  // 上面放行的是 `image/*`，其中 `image/svg+xml` 是**唯一能内嵌 `<script>` 的图片类型**。
+  // `<img src>` 引用它时浏览器不执行脚本，但**直接导航到本接口**时它会当文档加载，
+  // 脚本就在 retail.abobb.com 这个源下跑起来（缓存 7 天会放大影响）。
+  // `sandbox` 让该文档进沙箱（禁脚本 / 禁同源 / 禁表单）。CSP 只作用于 document，
+  // 不影响 `<img>` 引用，所以对正常展示零副作用。
+  // （要更严就把 svg 从白名单里剔除，代价是「品牌标是 svg + 外链失败」的回退会没图。）
+  setHeader(event, 'Content-Security-Policy', 'sandbox')
   setHeader(event, 'Cache-Control', 'public, max-age=86400, s-maxage=604800, stale-while-revalidate=604800')
 
   return response.body

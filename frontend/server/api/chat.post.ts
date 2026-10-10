@@ -587,14 +587,31 @@ export default defineEventHandler(async (event) => {
     // ── 两条都走不通，如实报错 ────────────────────────────────────
     // 这里只可能发生在大模型与商品库**同时**不可用（或兜底压根没配）。
     // 报错要给出两条链路的各自原因，否则用户只能看到一句没用的「失败了」。
-    event.node.res.statusCode = 503
+    //
+    // ⚠️ 状态码只在**响应头还没发出去**时才改得动。SSE 的头是在第一次 `res.write()`
+    //    时 flush 的：配了 LLM 时前面的 thinking `meta` 早已写出，此刻再赋 statusCode
+    //    是个空动作 —— 旧代码就埋在这里，行为随配置漂移（配了 LLM 恒 200、没配才 503），
+    //    这种「看起来设了其实没设」比干脆不设更难排查。所以先问 headersSent，
+    //    只在真能生效时设。错误语义始终由 `error` 事件承载，前端也只读事件。
+    console.error(
+      '[chat] 两条链路都不可用 | primary=%s | fallback=%s',
+      primary.reason ?? '原因未知',
+      fallback.reason ?? '原因未知',
+    )
+    if (!event.node.res.headersSent) {
+      event.node.res.statusCode = 503
+    }
     writeEvent(event, 'error', {
       message: hasLlmProvider(config)
         ? `定品失败：大模型（${primary.reason ?? '原因未知'}）、商品库兜底（${fallback.reason ?? '原因未知'}）都没取到，稍后再试一次。`
         : '尚未配置买手大模型（LLM_API_KEY / LLM_BASE_URL / LLM_MODEL），无法定品。',
     })
   } catch (error) {
-    event.node.res.statusCode = 502
+    // 同上：头已发出就改不动状态码了，错误靠 `error` 事件 + 日志送出。
+    console.error('[chat] 未捕获异常：', error)
+    if (!event.node.res.headersSent) {
+      event.node.res.statusCode = 502
+    }
     writeEvent(event, 'error', {
       message: error instanceof Error ? error.message : '顾问服务暂时不可用。',
     })

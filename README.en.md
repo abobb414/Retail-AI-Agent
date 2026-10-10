@@ -307,8 +307,10 @@ node scripts/system-test.mjs http://127.0.0.1:3101 --fallback   # assert the fal
 | `test-catalog-intent.mjs` | **42 cases** (21 profile + 21 clarify) | Intent recognition and clarifying-question phrasing across categories, audiences, budgets |
 | `test-brand-logo.mjs` | **9 cases** | Guards against third-party favicons posing as brand official logos (includes 16 third-party domain classes that must be blocked) |
 | `test-image-model-tokens.mjs` | 5 noisy URLs × 31 noise words + 6 real model numbers + 2 conflict verdicts + 4 brand tokens | Guards against "model-conflict misjudgment" throwing away good images |
+| `test-net-guard.mjs` | **61 cases** (15 groups) | Guards against the SSRF guard both missing internal addresses and blocking legitimate ones |
 
 ```bash
+node --experimental-strip-types scripts/test-net-guard.mjs
 node --experimental-strip-types scripts/test-brand-logo.mjs
 node --experimental-strip-types scripts/test-image-model-tokens.mjs
 node --experimental-strip-types scripts/test-catalog-intent.mjs
@@ -345,6 +347,7 @@ node scripts/probe-vision.mjs <baseUrl> <apiKey> <model> [imagePath]
 │   ├── test-natural-dialogues.mjs   # Offline regression: 30 natural-dialogue cases
 │   ├── test-catalog-intent.mjs      # Offline regression: 42 category-intent cases
 │   ├── test-brand-logo.mjs          # Offline regression: 9 brand-logo domain candidate cases
+│   ├── test-net-guard.mjs            # Offline regression: SSRF host guard, 61 cases
 │   ├── test-image-model-tokens.mjs  # Offline regression: model-token extraction
 │   ├── test-cold-products.mjs       # End-to-end: niche long-tail products
 │   ├── probe-vision.mjs             # Vision capability probe

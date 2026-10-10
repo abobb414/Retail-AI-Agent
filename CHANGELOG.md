@@ -2,6 +2,43 @@
 
 本文档记录 `Retail-AI-Agent` 的重要迭代。
 
+## [2026-10-10 · 下午] — 安全加固收尾：SVG 代理进沙箱 + SSE 状态码守卫 + SSRF 回归测试落盘
+
+用户原话：
+
+> 三个遗留问题（svg 白名单、19 组 SSRF 用例未落盘、statusCode 503 条件生效）……这三个你推荐我怎么搞
+>
+> 三处都已处理，构建通过，没有 warning。
+
+本轮只动三处，均为对上一节「已知残留」的收口。
+
+### 1. `/api/image` 保留 `image/svg+xml` 放行，改用 `Content-Security-Policy: sandbox` 关掉风险面
+
+依据：`/api/image` 的唯一消费者是商品卡，而商品卡对 `https://` 图片**直连外链**，只有外链失败才回退到本代理 —— 所以 svg 放行是品牌标兜底链路（`favicon.svg`）的必要条件，直接剔除白名单会让「品牌标是 svg + 外链失败」的回退没图。真正的风险面是**直接导航**到 `/api/image?url=<svg>` 时它被当文档加载、`<script>` 在站点同源下执行。`CSP: sandbox` 只作用于 document（禁脚本 / 禁同源 / 禁表单），对 `<img>` 引用零影响 —— 保留功能、关掉风险面的最小改动。
+
+### 2. `chat.post.ts` 的 `statusCode` 改为 `res.headersSent` 守卫
+
+依据：SSE 的响应头在第一次 `res.write()` 时 flush。配了 LLM 时前面的 thinking `meta` 早已写出，此刻再赋 `statusCode` 是**空动作** —— 旧代码「看起来设了其实没设」，行为随配置漂移（配了 LLM 恒 200、没配才 503），比干脆不设更难排查。现在两处赋值（503 / 502）都先问 `res.headersSent`，只在真能生效时设；错误语义始终由 `error` 事件承载（前端也只读事件），并补了两条 `console.error` 日志。**未配置 LLM 时该路径前面未写过任何事件，头未 flush，503 依然生效**。
+
+### 3. SSRF 回归测试落盘：`scripts/test-net-guard.mjs`
+
+依据：上一节的用例是一次性脚本跑的，**没入库** —— 守卫再改一次就没有回归保护。本文件直接 `import`（`netGuard.ts` 零 import，无需解析钩子），共 **61 例 / 15 组**，覆盖回环、私网、链路本地与云元数据、IPv4 映射的 IPv6（`[::ffff:7f00:1]` 拦、`[::ffff:8.8.8.8]` 放行）、URL 规范化（`127.1` / `2130706433` / `0x7f000001` 均解析为 `127.0.0.1`），以及**区间外侧必须放行的边界**（`172.32`、`172.15.255.255`、`100.128`、`fe7f`）和 `fdsports.com` / `fcbarcelona.com` 这类曾被 `startsWith('fc'/'fd')` 误伤的域名。
+
+文件名按仓库既有惯例用 kebab-case（对齐 `test-natural-dialogues` / `test-catalog-intent` / `test-brand-logo`）。`README.md`、`README.en.md`、`scripts/README.md` 三处均已登记命令与例数，命令带 `--experimental-strip-types`。
+
+### 验证
+
+- `node --experimental-strip-types scripts/test-net-guard.mjs` → **61 例全绿（15 组）**（提交前实跑复核）。
+- Nuxt 构建通过，无 warning。
+- `/api/image` 实测响应带 `Content-Security-Policy: sandbox` 与 `X-Content-Type-Options: nosniff`；直接导航到 svg 不再执行脚本。
+- `chat.post.ts` 两处 `if (!event.node.res.headersSent)` 就位；未配置 LLM 时仍返回 503。
+- 全库检索 `test-net-?guard` 共 7 处引用，均为新文件名，无旧名残留。
+
+### 本次未处理（承接上节，仍然开放）
+
+- **SSRF 守卫只看主机名与字面 IP，不做 DNS 解析** —— 「公网域名解析到内网 IP」仍在射程外，彻底解决要在 DNS 层校验。
+- `meta` 事件的 `hint` 字段、`llmBuyer.ts` 体积、根与前端两份 `normalizeText` —— 同前，有意未动。
+
 ## [2026-10-10] — 安全加固：入库鉴权 + 图片代理白名单 + SSRF 共享守卫；另修前端健壮性与清理冗余代码
 
 用户原话（改动清单，本次唯一需求来源）：
@@ -124,9 +161,11 @@ SSE 端到端正常（走商品库兜底、事件顺序正确）；入库鉴权�
   （`<img>` 引用不受影响，浏览器不执行 img 里的 SVG 脚本）。需要用户主动点击才成立，
   且站点无 localStorage / cookie 敏感数据，故定为中危。可选修法：保留 svg 放行（品牌标兜底链路
   会用到 `favicon.svg`）但给响应加 `Content-Security-Policy: sandbox`。
+  → **已于同日下午收口**：保留 svg 放行 + 加 `CSP: sandbox`（见上节第 1 条）。
 - **SSRF 守卫只看主机名与字面 IP，不做 DNS 解析** —— 「公网域名解析到内网 IP」仍挡不住，彻底解决要在 DNS 层校验。
 - **`chat.post.ts` 的 `statusCode = 503`** 在已配 LLM 且已写入 `meta` 时不生效（SSE 头已发出）；
   但**未配 LLM** 且主链路未写事件时它会生效 —— 行为随配置而异，未改。
+  → **已于同日下午收口**：两处赋值改为 `res.headersSent` 守卫（见上节第 2 条）。
 - `meta` 事件仍带 `hint` 字段，前端自 09-29 起已不渲染（等待态只留三点），属无害冗余，未清。
 - `llmBuyer.ts`（1769 行）体量大但核心路径都在用，拆分风险高，未动。
 - 根 `index.ts` 与前端各自有一份 `normalizeText` 等函数，分属两个独立部署单元，有意未合并。

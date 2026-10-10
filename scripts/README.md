@@ -48,6 +48,9 @@ node --experimental-strip-types scripts/test-catalog-intent.mjs
 All of these are offline (no API keys, no dev server needed):
 
 ```bash
+# SSRF 守卫：内网 / 回环 / 云元数据 / IPv4 映射的 IPv6，含区间外侧的边界（防误伤正常站点）
+node --experimental-strip-types scripts/test-net-guard.mjs
+
 # 图片 URL 的型号词元抽取：防「型号冲突误判」把好图全丢掉
 node --experimental-strip-types scripts/test-image-model-tokens.mjs
 
