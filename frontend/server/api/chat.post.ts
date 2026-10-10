@@ -61,6 +61,18 @@ interface WorkerChatResponse {
  */
 type Engine = 'llm' | 'catalog'
 
+/** 客户端传什么都可能：丢掉结构不对的条目，别让一条脏数据把整个接口打成 500。 */
+function sanitizeMessages(raw: unknown): IncomingMessage[] {
+  if (!Array.isArray(raw)) {
+    return []
+  }
+
+  return raw.filter(
+    (message): message is IncomingMessage =>
+      (message?.role === 'user' || message?.role === 'assistant') && typeof message.content === 'string',
+  )
+}
+
 function getLatestUserText(messages: IncomingMessage[]) {
   return [...messages]
     .reverse()
@@ -380,7 +392,6 @@ async function runLlmPrimary(
           searched: locked.searched,
           search_queries: locked.searchQueries,
           search_source: describeSearchSource(config),
-          profile_summary: [],
         })
       },
     })
@@ -409,7 +420,6 @@ async function runLlmPrimary(
         search_source: describeSearchSource(config),
         source_verified: outcome.sourceVerified,
         image_from: outcome.imageFrom,
-        profile_summary: [],
       })
       writeEvent(event, 'done', { source: 'llm_primary' })
 
@@ -430,7 +440,6 @@ async function runLlmPrimary(
         searched: outcome.searched,
         search_queries: outcome.searchQueries,
         search_source: describeSearchSource(config),
-        profile_summary: [],
       })
     }
     writeEvent(event, 'done', { source: 'llm_primary' })
@@ -493,7 +502,6 @@ async function runCatalogFallback(
       // 保留失败原因，供内部诊断；前端不把服务来源或错误细节暴露给用户。
       // 注意别再加「大模型定品失败：」前缀 —— upstream 的 reason 里已经有了，会重复。
       fallback_reason: fallbackReason,
-      profile_summary: [],
     })
     writeEvent(event, 'done', { source: 'catalog_fallback' })
 
@@ -507,8 +515,8 @@ async function runCatalogFallback(
 
 export default defineEventHandler(async (event) => {
   const config = useRuntimeConfig()
-  const body = await readBody<ChatRequest>(event)
-  const messages = body.messages ?? []
+  const body = await readBody<ChatRequest>(event).catch(() => null)
+  const messages = sanitizeMessages(body?.messages)
   const latestUserText = getLatestUserText(messages)
 
   event.node.res.setHeader('Cache-Control', 'no-cache')
@@ -539,8 +547,6 @@ export default defineEventHandler(async (event) => {
         engine: 'llm' satisfies Engine,
         stage: 'thinking',
         pending: true,
-        // 前端只显示统一的三点等待动画，不暴露内部检索或模型流程。
-        profile_summary: [],
       })
     }
 
@@ -564,7 +570,6 @@ export default defineEventHandler(async (event) => {
         stage: 'thinking',
         pending: true,
         hint: '大模型这会儿不稳，正在从在售商品库里找…',
-        profile_summary: [],
       })
     }
 

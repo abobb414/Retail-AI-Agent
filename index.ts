@@ -36,6 +36,8 @@ export interface Env {
   DB: D1Database;
   VECTOR_INDEX: VectorizeIndex;
   AI: Ai;
+  /** 商品入库口令（wrangler secret put INGEST_TOKEN）。未配置则入库接口整体关闭。 */
+  INGEST_TOKEN?: string;
 }
 
 import {
@@ -289,6 +291,15 @@ async function handleIngest(request: Request, env: Env): Promise<Response> {
       405,
       { Allow: "POST, OPTIONS" },
     );
+  }
+
+  // 入库会写 D1 并消耗 embedding 额度，workers.dev 地址是公开的，必须有口令。
+  if (!env.INGEST_TOKEN) {
+    throw new HttpError(403, "Ingest is disabled: INGEST_TOKEN is not configured.");
+  }
+
+  if (!timingSafeEqual(request.headers.get("x-ingest-token") ?? "", env.INGEST_TOKEN)) {
+    throw new HttpError(401, "Invalid ingest token.");
   }
 
   const payload = await parseJsonBody(request);
@@ -1420,27 +1431,6 @@ function buildDeterministicNextStep(product: ProductContext): string {
   return "下一步先确认商品规格、库存和售后信息，再决定是否下单。";
 }
 
-function isUsableConsultantText(value: unknown): value is string {
-  if (typeof value !== "string") {
-    return false;
-  }
-
-  const text = cleanConsultantText(value);
-  return text.length >= 8 && !/(?:或者|以及|和|或|、|，|,|：|:|；|;)$/.test(text);
-}
-
-function cleanConsultantText(value: string): string {
-  return value
-    .replace(/您/g, "你")
-    .replace(/^(您好|你好|嗨|哈喽)[，,。!！\s]*/g, "")
-    .replace(/亲爱的用户[，,。!！\s]*/g, "")
-    .replace(/欢迎来到[^，,。!！]*[，,。!！\s]*/g, "")
-    .replace(/(?:我|我们)?为您推荐(?:以下)?(?:的)?商品(?:是)?[：:，,。!！\s]*/g, "")
-    .replace(/(?:我|我们)?推荐(?:的)?(?:商品)?(?:是)?[：:，,。!！\s]*/g, "")
-    .replace(/(?:可以)?直接购买[，,。!！\s]*/g, "")
-    .trim();
-}
-
 export function buildNoMatchResponse(message?: string, nearestProduct?: ProductContext | null): ChatResponse {
   const profile = message ? detectRequestProfile(message) : null;
   const requestedDetails = profile
@@ -1539,11 +1529,6 @@ function parseJsonStringArray(value: string | null): string[] {
   }
 }
 
-function preferNonEmptyStringArray(primary: unknown, fallback: string[]): string[] {
-  const normalized = normalizeStringArray(primary);
-  return normalized.length > 0 ? normalized : fallback;
-}
-
 function formatPrice(price: number | null): string {
   if (typeof price !== "number" || !Number.isFinite(price) || price <= 0) {
     return "价格以官网为准";
@@ -1565,6 +1550,19 @@ function jsonResponse(
       ...headers,
     },
   });
+}
+
+/** 常量时间比较：不因「前缀对了多少」而早退，避免靠响应耗时逐字猜口令。 */
+function timingSafeEqual(a: string, b: string): boolean {
+  const left = textEncoder.encode(a);
+  const right = textEncoder.encode(b);
+  let diff = left.length ^ right.length;
+
+  for (let i = 0; i < Math.max(left.length, right.length); i += 1) {
+    diff |= (left[i] ?? 0) ^ (right[i] ?? 0);
+  }
+
+  return diff === 0;
 }
 
 function corsHeaders(): HeadersInit {

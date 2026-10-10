@@ -22,6 +22,7 @@ const startIndex = readNonNegativeInteger("START_INDEX", 0);
 const limit = process.env.LIMIT ? readPositiveInteger("LIMIT", 0) : undefined;
 const postClient = process.env.POST_CLIENT ?? "curl";
 const workerResolveIp = process.env.WORKER_RESOLVE_IP;
+const ingestToken = process.env.INGEST_TOKEN;
 const execFileAsync = promisify(execFile);
 
 if (!workerUrl) {
@@ -29,6 +30,11 @@ if (!workerUrl) {
   console.error(
     "  WORKER_URL=https://your-worker.your-subdomain.workers.dev node scripts/import-real-products.mjs",
   );
+  process.exit(1);
+}
+
+if (!ingestToken) {
+  console.error("Missing INGEST_TOKEN (must match the Worker secret of the same name).");
   process.exit(1);
 }
 
@@ -152,6 +158,7 @@ async function postJson(batch, batchIndex, absoluteStart) {
       method: "POST",
       headers: {
         "content-type": "application/json",
+        "x-ingest-token": ingestToken,
       },
       body: JSON.stringify(batch),
     });
@@ -179,6 +186,8 @@ async function postJson(batch, batchIndex, absoluteStart) {
     workerUrl,
     "-H",
     "content-type: application/json",
+    "-H",
+    `x-ingest-token: ${ingestToken}`,
     "-w",
     "\n%{http_code}",
     "--data-binary",

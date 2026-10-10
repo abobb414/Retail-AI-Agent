@@ -2,6 +2,135 @@
 
 本文档记录 `Retail-AI-Agent` 的重要迭代。
 
+## [2026-10-10] — 安全加固：入库鉴权 + 图片代理白名单 + SSRF 共享守卫；另修前端健壮性与清理冗余代码
+
+用户原话（改动清单，本次唯一需求来源）：
+
+> 安全问题（优先修）
+> 1. 根 Worker 的入库接口没有鉴权。除了 /api/chat 之外的所有 POST 都会进 handleIngest，
+>    任何人拿到公开的 workers.dev 地址就能往 D1 和 Vectorize 写商品、消耗 embedding 额度。
+>    现在改为要求 x-ingest-token 头与 Worker 的 INGEST_TOKEN secret 一致，未配置则整体拒绝。
+> 2. 图片代理 /api/image 可以被当成开放代理。它原样透传上游 Content-Type，于是
+>    /api/image?url=<任意页面> 会在我们的域名下返回 text/html。现在只放行 image/* 和
+>    application/octet-stream，并加上 nosniff。
+> 3. 图片代理的 SSRF 守卫有漏洞。fetch 默认跟随重定向，公网地址 302 到内网就能绕过；
+>    IPv6 字面量（[::1]）因为带方括号而永远匹配不上；startsWith('fc'/'fd') 会误伤
+>    fdsports.com 这类正常域名。现在抽成共享的 netGuard.ts，逐跳校验重定向，并补上
+>    169.254 元数据地址、IPv4 映射的 IPv6 等情况。sourcePage.ts 也改用这份守卫，删掉了它那份复制粘贴的版本。
+> ……（其他代码问题、精简冗余代码、行为变化、验证情况见下）
+
+### 1. 安全：入库接口加口令
+
+`/api/chat` 之外的所有请求都会落到 `handleIngest`，而 workers.dev 地址是公开的 ——
+任何人 POST 一批商品就能写 D1、upsert Vectorize 并消耗 embedding 额度。
+
+- `Env` 新增可选 `INGEST_TOKEN`；`handleIngest` 在 `parseJsonBody` **之前**（也在任何写操作之前）校验。
+- **未配置 secret → 403 整体拒绝**（宁可功能关闭，也不留一条无鉴权的写入通道）。
+- 口令比对用新增的 `timingSafeEqual`（常量时间，逐字节异或累积），避免靠响应耗时逐字猜口令。
+- 缺头 / 错头 / 前缀相似 → 401。
+
+### 2. 安全：图片代理不再是开放代理
+
+`/api/image` 原样透传上游 `Content-Type`，于是 `/api/image?url=<任意页面>` 会在**我们自己的域名下**
+输出 `text/html` —— 等于把站点变成开放代理 + 内容伪装。
+
+- 只放行 `image/*` 与 `application/octet-stream`，其余返回 415。
+- 补 `X-Content-Type-Options: nosniff`。
+- `new URL(imageUrl)` 包进 try，畸形 URL 返回 400 而不是 500。
+
+### 3. 安全：SSRF 守卫抽成 `netGuard.ts` 并修三个洞
+
+原守卫在 `api/image.get.ts` 与 `utils/sourcePage.ts` 里各抄了一份，且有三个问题：
+
+| 洞 | 后果 | 修法 |
+| --- | --- | --- |
+| `fetch` 默认跟随重定向 | 公网地址 302 到 `127.0.0.1` 即可绕过全部检查 | 改 `redirect: 'manual'`，**手工逐跳**校验（上限 3 跳） |
+| IPv6 字面量带方括号 | `URL.hostname` 返回 `[::1]`，与 `'::1'` 永不相等 | 先 `replace(/^\[|\]$/g, '')` 剥括号，再去尾点 |
+| `startsWith('fc'/'fd')` | 把 `fdsports.com`、`fda.gov` 这类正常域名当内网拦掉 | 只在**含冒号**的 IPv6 分支里用 `/^f[cd]/` |
+
+顺带补齐：`169.254.0.0/16`（云元数据）、`100.64.0.0/10`（运营商级 NAT）、`0.0.0.0/8`、
+IPv4 映射的 IPv6（`::ffff:127.0.0.1` 与 URL 规范化后的 `::ffff:7f00:1` 两种写法都要认）。
+
+`sourcePage.ts` 删掉自己那份复制版，改 `import { isBlockedHost } from './netGuard'`。
+
+### 4. 前端 / 接口健壮性
+
+- **`chat.post.ts`**：`readBody` 失败或 `content` 不是字符串时，原来会在 try 外面抛通用 500。
+  现在 `readBody(...).catch(() => null)`，并用新增的 `sanitizeMessages` 丢掉结构不对的条目
+  （只保留 `role` 为 user/assistant 且 `content` 是字符串的项）。
+- **`useChat.ts`**：`assistantMessage` 是原始对象，直接改属性不触发 Vue 更新 ——
+  原来靠每个 chunk 都 `messages.value = [...messages.value]` 这种整数组重赋值来补救。
+  现在 push 后用 `messages.value.at(-1)!` **取响应式代理**再改，重赋值那几行全部删除。
+- **`useChat.ts`**：`JSON.parse(payload)` 包 try/catch —— 单条 SSE 数据损坏不再毁掉整轮回复。
+- 删除服务端一直在发、但没人读的 `profile_summary` 字段（5 处 `writeEvent`）。
+
+### 5. 清理冗余
+
+- **删除 7 个零引用模块**：`catalogFilters`、`catalogIntents`、`catalogText`、`catalogTypes`、
+  `productCatalog`、`productImagePolicy`、`recommendationSlots`（共 ~1170 行）。
+  这是一条自成闭环的旧商品分类链路，线上没有任何路径会走到它。
+- 删除孤立组件 `StatusPanel.vue`。
+- 删除无引用函数：`formatLogoAudit`、`resetSearchBreaker`、根 `index.ts` 里的
+  `isUsableConsultantText` / `cleanConsultantText` / `preferNonEmptyStringArray`。
+- 删除 `useChat` 里页面从不读取的返回：`demoMode`、`engine`、`fallbackReason`、`hasResponded`、
+  `searched`、`searchQueries`、`conversationStage`、`profileSummary`；以及请求体里服务端不读的 `clientDirective`。
+
+### 6. 文档同步（复核时补齐）
+
+本次改了行为但 README 没跟上，提交前一并补齐（中英双份）：
+
+- `README.md` / `README.en.md` 的 SSE `meta` 示例里仍写着 `"profile_summary": []`，
+  而服务端已不再发这个字段 —— 删掉。
+- 两份 README 的 **Worker Bindings** 表格补上 `env.INGEST_TOKEN`，并加一句
+  「这是公开可访问的地址，没口令任何人都能写库」的说明。
+- 两份 README 的**数据导入**示例补上 `INGEST_TOKEN=...`（照旧文档跑会直接失败），
+  **部署**章节补上 `npx wrangler secret put INGEST_TOKEN`。
+
+### ⚠️ 行为变化：入库接口现在必须配口令
+
+**部署 Worker 之前**必须先设 secret，否则**导入脚本会失败**（脚本本身也改成缺 token 直接退出）：
+
+```bash
+cd "/Volumes/Abobb-disk/Retail Ai Agent" && npx wrangler secret put INGEST_TOKEN
+```
+
+导入时带上同一个值：`INGEST_TOKEN=... node scripts/import-real-products.mjs`。
+`scripts/import-real-products.mjs`（fetch 与 curl 两条路径）与 `scripts/README.md` 已同步。
+
+### 验证
+
+**用户侧**：Nuxt 构建通过（无 warning）；根 Worker esbuild 打包通过；SSRF 守卫 19 组用例通过；
+本地起构建产物后内网/元数据/IPv6 回环与 ULA 均 400、`fdsports.com` 不再被误拦；
+SSE 端到端正常（走商品库兜底、事件顺序正确）；入库鉴权四种拒绝路径符合预期；
+离线回归 `test-catalog-intent` / `test-brand-logo` / `test-image-model-tokens` / `test-llm-lines` 通过。
+
+**复核侧（提交前独立复跑，脚本在 `/tmp`，未入库）**：
+
+| 项 | 结果 |
+| --- | --- |
+| SSRF 守卫边界用例 **58 组**（含 `127.1` / `2130706433` / `0x7f000001` 等 URL 规范化、`::ffff:7f00:1`、172.32 与 100.128 边界、`fdsports.com`/`fdic.gov` 不误伤） | 58/58 通过 |
+| 入库鉴权 **12 组**（未配置/缺头/空头/错头/少一字符/多一字符/大小写不同/GET/空数组/坏 JSON/正确口令进写路径） | 12/12 通过；**拒绝路径对 DB / Vectorize / AI 的触碰次数为 0** |
+| 公网 302 → 内网（`127.0.0.1` / `169.254.169.254` / `[::1]`） | 全部 400 拦下（旧代码此处可绕过） |
+| 公网 302 → 公网 / 超 3 跳 | 正常跟随 200 / 502 Too many redirects |
+| `/api/image` 上游 `text/html` | 415 Upstream is not an image |
+| `/api/image` 上游真图片 | 200 + `image/png` + `X-Content-Type-Options: nosniff` |
+| 删除项引用检查（7 模块 + StatusPanel + 5 函数 + 8 个未消费返回值 + `clientDirective`） | grep 全库仅 CHANGELOG 历史提及，源码零引用 |
+| Nuxt 构建 / 根 Worker esbuild 打包 / SSE 端到端 / 离线回归 3 项 | 全部通过 |
+
+### 已知残留（本次有意未处理）
+
+- **`image/svg+xml` 仍在白名单内**（因为 `image/*` 是全放行）。实测 `/api/image?url=<svg>` 会在
+  **同源**下返回 SVG 文档 —— 直接导航到该 URL 时，SVG 内的 `<script>` 会在站点源下执行
+  （`<img>` 引用不受影响，浏览器不执行 img 里的 SVG 脚本）。需要用户主动点击才成立，
+  且站点无 localStorage / cookie 敏感数据，故定为中危。可选修法：保留 svg 放行（品牌标兜底链路
+  会用到 `favicon.svg`）但给响应加 `Content-Security-Policy: sandbox`。
+- **SSRF 守卫只看主机名与字面 IP，不做 DNS 解析** —— 「公网域名解析到内网 IP」仍挡不住，彻底解决要在 DNS 层校验。
+- **`chat.post.ts` 的 `statusCode = 503`** 在已配 LLM 且已写入 `meta` 时不生效（SSE 头已发出）；
+  但**未配 LLM** 且主链路未写事件时它会生效 —— 行为随配置而异，未改。
+- `meta` 事件仍带 `hint` 字段，前端自 09-29 起已不渲染（等待态只留三点），属无害冗余，未清。
+- `llmBuyer.ts`（1769 行）体量大但核心路径都在用，拆分风险高，未动。
+- 根 `index.ts` 与前端各自有一份 `normalizeText` 等函数，分属两个独立部署单元，有意未合并。
+
 ## [2026-10-08] — 品牌锁合提到整页左上角 + 卡片外围上下留白配平 + 页脚版权
 
 用户原话（本次唯一需求来源，按先后顺序）：

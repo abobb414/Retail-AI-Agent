@@ -410,6 +410,15 @@ WORKER_RESOLVE_IP=
 | `env.DB` | D1 database `retail-ai-agent-db` |
 | `env.VECTOR_INDEX` | Vectorize index `retail-ai-agent-products-bge-m3` |
 | `env.AI` | Workers AI（Embedding） |
+| `env.INGEST_TOKEN` | **Secret（必配）**：商品入库口令。未配置时入库接口整体返回 403 |
+
+```bash
+# 入库接口只认带 x-ingest-token 头的请求，先设口令再部署
+npx wrangler secret put INGEST_TOKEN
+```
+
+> 这是个公开可访问的 workers.dev 地址，而 `/api/chat` 之外的任何 POST 都会落到入库逻辑。
+> 没有口令的话，任何人都能往 D1 / Vectorize 写商品并消耗 embedding 额度，所以宁可整体关掉。
 
 ### 模型选型参考
 
@@ -457,8 +466,7 @@ WORKER_RESOLVE_IP=
   "mode": "catalog",
   "engine": "catalog",
   "stage": "rag_recommendation",
-  "fallback_reason": "大模型定品失败：deepseek-v4.1-flash 处于熔断冷却期",
-  "profile_summary": []
+  "fallback_reason": "大模型定品失败：deepseek-v4.1-flash 处于熔断冷却期"
 }
 ```
 
@@ -478,12 +486,14 @@ WORKER_RESOLVE_IP=
 # 升级 D1 商品表
 D1_DATABASE_NAME=retail-ai-agent-db node scripts/migrate-products-schema.mjs
 
-# 小批量烟测导入
-WORKER_URL=https://<worker> LIMIT=5 BATCH_SIZE=8 CONCURRENCY=1 \
+# 小批量烟测导入（INGEST_TOKEN 必须与 Worker 上的 secret 一致）
+WORKER_URL=https://<worker> INGEST_TOKEN=<same as the Worker secret> \
+  LIMIT=5 BATCH_SIZE=8 CONCURRENCY=1 \
   node scripts/import-real-products.mjs
 
 # 断点续跑
-WORKER_URL=https://<worker> START_INDEX=500 BATCH_SIZE=8 CONCURRENCY=1 \
+WORKER_URL=https://<worker> INGEST_TOKEN=<same as the Worker secret> \
+  START_INDEX=500 BATCH_SIZE=8 CONCURRENCY=1 \
   node scripts/import-real-products.mjs
 ```
 
@@ -497,7 +507,8 @@ WORKER_URL=https://<worker> START_INDEX=500 BATCH_SIZE=8 CONCURRENCY=1 \
 # 前端（Vercel Project 的 Root Directory 设为 `frontend`）
 cd frontend && vercel deploy --prod --yes
 
-# Worker
+# Worker（首次部署前先设入库口令，否则入库接口会整体拒绝）
+npx wrangler secret put INGEST_TOKEN
 npx wrangler deploy
 ```
 

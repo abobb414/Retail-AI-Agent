@@ -2,11 +2,13 @@ import type { ChatMessage, Recommendation } from '~/types/recommendation'
 
 const welcomeMessage = '欢迎来到灵感买手店。你可以说一个品类，也可以说一个场景；如果信息还不够，我会先问一句再推荐。'
 const quickPrompts = ['给我推荐半袖', '想找一把办公椅', '小卧室想更舒服']
-const clientDirective = `Stage 0: 用户可能是在找一个商品，也可能是在描述一个生活状态。
-Stage 1: 先判断品类、场景、预算、尺码、风格或安装条件是否足够。
-Stage 2: 信息不足时先问一个关键问题；信息足够时后端再从商品库锁定一个商品。
-Stage 3: 模型只负责把锁定商品包装成自然导购建议，语气要专业、克制、有同理心，不要像搜索结果。`
 
+interface StreamTarget {
+  assistantMessage: ChatMessage
+  activeRecommendation: Ref<Recommendation | null>
+}
+
+/** 按空行切出完整的 SSE 事件块；末尾不完整的那段留给下一次拼接。 */
 function splitServerEvents(buffer: string) {
   const parts = buffer.split('\n\n')
   return {
@@ -15,28 +17,22 @@ function splitServerEvents(buffer: string) {
   }
 }
 
-function applyServerEvent(rawEvent: string, assistantMessage: ChatMessage, state: {
-  demoMode: Ref<boolean>
-  conversationStage: Ref<string>
-  profileSummary: Ref<string[]>
-  activeRecommendation: Ref<Recommendation | null>
-  engine: Ref<'catalog' | 'llm' | ''>
-  fallbackReason: Ref<string>
-  hasResponded: Ref<boolean>
-  searched: Ref<boolean>
-  searchQueries: Ref<string[]>
-}) {
+function applyServerEvent(rawEvent: string, { assistantMessage, activeRecommendation }: StreamTarget) {
   const lines = rawEvent.split('\n')
-  const eventLine = lines.find((line) => line.startsWith('event:'))
-  const dataLine = lines.find((line) => line.startsWith('data:'))
-  const eventName = eventLine?.slice(6).trim()
-  const payload = dataLine?.slice(5).trim()
+  const eventName = lines.find((line) => line.startsWith('event:'))?.slice(6).trim()
+  const payload = lines.find((line) => line.startsWith('data:'))?.slice(5).trim()
 
   if (!eventName || !payload) {
     return
   }
 
-  const data = JSON.parse(payload)
+  let data: Record<string, any>
+  try {
+    data = JSON.parse(payload)
+  } catch {
+    // 单条数据损坏不应毁掉整轮回复，跳过即可。
+    return
+  }
 
   if (eventName === 'chunk' && data.text) {
     assistantMessage.content += data.text
@@ -45,31 +41,14 @@ function applyServerEvent(rawEvent: string, assistantMessage: ChatMessage, state
 
   if (eventName === 'product' && data.product) {
     assistantMessage.recommendation = data.product
-    state.activeRecommendation.value = data.product
+    activeRecommendation.value = data.product
     return
   }
 
-  if (eventName === 'meta') {
-    state.hasResponded.value = true
-    state.demoMode.value = data.mode === 'mock'
-    state.engine.value = data.engine === 'llm' || data.engine === 'catalog' ? data.engine : ''
-    state.fallbackReason.value = data.fallback_reason ?? ''
-    if (data.stage) {
-      state.conversationStage.value = data.stage
-      if (data.stage !== 'rag_recommendation') {
-        state.activeRecommendation.value = null
-        assistantMessage.recommendation = null
-      }
-    }
-    state.profileSummary.value = data.profile_summary ?? []
-    // 联网检索状态：pending 阶段没有这两个字段，别把上一轮的结果带过来。
-    if (data.pending === true) {
-      state.searched.value = false
-      state.searchQueries.value = []
-    } else {
-      state.searched.value = data.searched === true
-      state.searchQueries.value = Array.isArray(data.search_queries) ? data.search_queries : []
-    }
+  // 非定品阶段（思考中 / 追问）没有卡片，清掉上一轮残留。
+  if (eventName === 'meta' && data.stage && data.stage !== 'rag_recommendation') {
+    assistantMessage.recommendation = null
+    activeRecommendation.value = null
     return
   }
 
@@ -80,51 +59,23 @@ function applyServerEvent(rawEvent: string, assistantMessage: ChatMessage, state
   }
 }
 
+function welcomeMessages(): ChatMessage[] {
+  return [{ id: 1, role: 'assistant', content: welcomeMessage, recommendation: null }]
+}
+
 export function useChat() {
   const draft = ref('')
   const isStreaming = ref(false)
   const nextId = ref(2)
-  const demoMode = ref(true)
-  const engine = ref<'catalog' | 'llm' | ''>('')
-  const fallbackReason = ref('')
-  // 首次响应前不该断言「演示模式」—— 那只是初始值，不是事实。
-  const hasResponded = ref(false)
-  // 本轮是否真的联网检索过，以及检索用的关键词。
-  const searched = ref(false)
-  const searchQueries = ref<string[]>([])
-  const conversationStage = ref('clarify_space')
-  const profileSummary = ref<string[]>([])
   const activeRecommendation = ref<Recommendation | null>(null)
-  const messages = ref<ChatMessage[]>([
-    {
-      id: 1,
-      role: 'assistant',
-      content: welcomeMessage,
-      recommendation: null,
-    },
-  ])
+  const messages = ref<ChatMessage[]>(welcomeMessages())
 
   function resetChat() {
     draft.value = ''
     isStreaming.value = false
     nextId.value = 2
-    demoMode.value = true
-    engine.value = ''
-    fallbackReason.value = ''
-    hasResponded.value = false
-    searched.value = false
-    searchQueries.value = []
-    conversationStage.value = 'clarify_space'
-    profileSummary.value = []
     activeRecommendation.value = null
-    messages.value = [
-      {
-        id: 1,
-        role: 'assistant',
-        content: welcomeMessage,
-        recommendation: null,
-      },
-    ]
+    messages.value = welcomeMessages()
   }
 
   async function sendMessage(overrideText?: string) {
@@ -133,12 +84,7 @@ export function useChat() {
       return
     }
 
-    messages.value.push({
-      id: nextId.value++,
-      role: 'user',
-      content: userText,
-      recommendation: null,
-    })
+    messages.value.push({ id: nextId.value++, role: 'user', content: userText, recommendation: null })
     draft.value = ''
     activeRecommendation.value = null
     messages.value = messages.value.map((message) =>
@@ -146,29 +92,22 @@ export function useChat() {
     )
 
     const requestMessages = messages.value.map(({ role, content }) => ({ role, content }))
-    const assistantMessage: ChatMessage = {
-      id: nextId.value++,
-      role: 'assistant',
-      content: '',
-      isStreaming: true,
-      recommendation: null,
-    }
 
-    messages.value.push(assistantMessage)
+    messages.value.push({ id: nextId.value++, role: 'assistant', content: '', isStreaming: true, recommendation: null })
+    // 取响应式代理：直接改原始对象不会触发界面更新。
+    const assistantMessage = messages.value.at(-1)!
+    const target: StreamTarget = { assistantMessage, activeRecommendation }
     isStreaming.value = true
 
     try {
       const response = await fetch('/api/chat', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ messages: requestMessages, clientDirective }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: requestMessages }),
       })
 
       if (!response.ok) {
-        const errorText = await response.text()
-        throw new Error(errorText || '顾问服务暂时不可用。')
+        throw new Error((await response.text()) || '顾问服务暂时不可用。')
       }
 
       if (!response.body) {
@@ -188,39 +127,12 @@ export function useChat() {
         buffer += decoder.decode(value, { stream: true })
         const { complete, remainder } = splitServerEvents(buffer)
         buffer = remainder
-
-        for (const rawEvent of complete) {
-          applyServerEvent(rawEvent, assistantMessage, {
-            demoMode,
-            conversationStage,
-            profileSummary,
-            activeRecommendation,
-            engine,
-            fallbackReason,
-            hasResponded,
-            searched,
-            searchQueries,
-          })
-        }
-
-        messages.value = [...messages.value]
+        complete.forEach((rawEvent) => applyServerEvent(rawEvent, target))
       }
 
+      // 流结束时补上最后一个没有空行结尾的事件。
       buffer += decoder.decode()
-      const { complete } = splitServerEvents(`${buffer}\n\n`)
-      for (const rawEvent of complete) {
-        applyServerEvent(rawEvent, assistantMessage, {
-          demoMode,
-          conversationStage,
-          profileSummary,
-          activeRecommendation,
-          engine,
-          fallbackReason,
-          hasResponded,
-          searched,
-          searchQueries,
-        })
-      }
+      splitServerEvents(`${buffer}\n\n`).complete.forEach((rawEvent) => applyServerEvent(rawEvent, target))
 
       if (!assistantMessage.content.trim()) {
         assistantMessage.content = '我暂时还没有整理出明确判断，你可以再补一句你更想要的氛围或使用方式。'
@@ -232,25 +144,16 @@ export function useChat() {
     } finally {
       assistantMessage.isStreaming = false
       isStreaming.value = false
-      messages.value = [...messages.value]
     }
   }
 
   return {
     activeRecommendation,
-    conversationStage,
-    demoMode,
     draft,
-    engine,
-    fallbackReason,
-    hasResponded,
     isStreaming,
     messages,
-    profileSummary,
     quickPrompts,
     resetChat,
-    searched,
-    searchQueries,
     sendMessage,
   }
 }

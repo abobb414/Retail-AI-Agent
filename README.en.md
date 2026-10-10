@@ -413,6 +413,16 @@ Configured in [`wrangler.jsonc`](wrangler.jsonc):
 | `env.DB` | D1 database `retail-ai-agent-db` |
 | `env.VECTOR_INDEX` | Vectorize index `retail-ai-agent-products-bge-m3` |
 | `env.AI` | Workers AI (Embedding) |
+| `env.INGEST_TOKEN` | **Secret (required)**: product-ingest passphrase. When unset, the ingest endpoint rejects everything with 403 |
+
+```bash
+# The ingest endpoint only accepts requests carrying an x-ingest-token header, so set the secret first
+npx wrangler secret put INGEST_TOKEN
+```
+
+> The workers.dev URL is publicly reachable, and every POST other than `/api/chat` lands in the ingest
+> logic. Without a passphrase anyone could write products into D1 / Vectorize and burn embedding
+> quota, so it is better to switch the endpoint off entirely.
 
 ### Model selection notes
 
@@ -462,8 +472,7 @@ When falling back to the catalog, `meta` looks like:
   "mode": "catalog",
   "engine": "catalog",
   "stage": "rag_recommendation",
-  "fallback_reason": "大模型定品失败：deepseek-v4.1-flash 处于熔断冷却期",
-  "profile_summary": []
+  "fallback_reason": "大模型定品失败：deepseek-v4.1-flash 处于熔断冷却期"
 }
 ```
 
@@ -487,12 +496,14 @@ Returns `chat_reply` + `recommended_product` (with `name` / `brand` / `price_dis
 # Upgrade the D1 products table
 D1_DATABASE_NAME=retail-ai-agent-db node scripts/migrate-products-schema.mjs
 
-# Small-batch smoke-test import
-WORKER_URL=https://<worker> LIMIT=5 BATCH_SIZE=8 CONCURRENCY=1 \
+# Small-batch smoke-test import (INGEST_TOKEN must match the Worker secret)
+WORKER_URL=https://<worker> INGEST_TOKEN=<same as the Worker secret> \
+  LIMIT=5 BATCH_SIZE=8 CONCURRENCY=1 \
   node scripts/import-real-products.mjs
 
 # Resume from a checkpoint
-WORKER_URL=https://<worker> START_INDEX=500 BATCH_SIZE=8 CONCURRENCY=1 \
+WORKER_URL=https://<worker> INGEST_TOKEN=<same as the Worker secret> \
+  START_INDEX=500 BATCH_SIZE=8 CONCURRENCY=1 \
   node scripts/import-real-products.mjs
 ```
 
@@ -506,7 +517,8 @@ See [scripts/README.md](scripts/README.md) for detailed parameters.
 # Frontend (set the Vercel Project's Root Directory to `frontend`)
 cd frontend && vercel deploy --prod --yes
 
-# Worker
+# Worker (set the ingest passphrase before the first deploy, or ingest rejects everything)
+npx wrangler secret put INGEST_TOKEN
 npx wrangler deploy
 ```
 

@@ -13,6 +13,7 @@
 
 import { brandTokens, gateImage, isBrandOfficialHost, safeHostname } from './imageTrust'
 import type { ImageJudgeResult } from './imageJudge'
+import { isBlockedHost } from './netGuard'
 
 /**
  * 商品图来自哪里。分成多级是为了能观测各级命中率 —— 之前只有「有图/无图」一个信号，
@@ -82,22 +83,7 @@ const PROBE_TIMEOUT_MS = 8_000
 const MAX_HTML_BYTES = 512 * 1024
 const MAX_REDIRECTS = 3
 
-/** 与 api/image.get.ts 同源的 SSRF 守卫：内网地址一律不许碰。 */
-export function isBlockedHost(hostname: string) {
-  const normalizedHost = hostname.toLowerCase()
-  return (
-    normalizedHost === 'localhost' ||
-    normalizedHost.endsWith('.localhost') ||
-    normalizedHost === '0.0.0.0' ||
-    normalizedHost.startsWith('127.') ||
-    normalizedHost.startsWith('10.') ||
-    normalizedHost.startsWith('192.168.') ||
-    /^172\.(1[6-9]|2\d|3[0-1])\./.test(normalizedHost) ||
-    normalizedHost === '::1' ||
-    normalizedHost.startsWith('fc') ||
-    normalizedHost.startsWith('fd')
-  )
-}
+/** SSRF 守卫见 netGuard.ts（与 api/image.get.ts 共用）。 */
 
 function isFetchableUrl(raw: string): URL | null {
   try {

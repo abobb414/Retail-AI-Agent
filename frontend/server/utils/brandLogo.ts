@@ -322,8 +322,3 @@ export async function resolveBrandLogo(options: {
   const best = results[0]
   return { url: best.url, domain: best.domain }
 }
-
-/** 压成一行日志。 */
-export function formatLogoAudit(brand: string, result: BrandLogoResult | null) {
-  return JSON.stringify({ brand, logo: result?.url ?? '', domain: result?.domain ?? '' })
-}

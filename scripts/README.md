@@ -4,8 +4,13 @@
 
 ```bash
 WORKER_URL=https://your-worker.your-subdomain.workers.dev \
+INGEST_TOKEN=<same value as the Worker secret INGEST_TOKEN> \
 node scripts/import-real-products.mjs
 ```
+
+The Worker rejects ingest requests without a matching `x-ingest-token` header
+(and refuses all ingest when `INGEST_TOKEN` is not set on the Worker). Set it
+once with `wrangler secret put INGEST_TOKEN`.
 
 The script reads `frontend/server/data/realProducts.json`, merges structured
 facets from `frontend/server/data/productFacets.json` by product ID, splits the
@@ -27,6 +32,7 @@ Smoke test with one product:
 
 ```bash
 WORKER_URL=https://your-worker.your-subdomain.workers.dev \
+INGEST_TOKEN=<same value as the Worker secret INGEST_TOKEN> \
 LIMIT=1 \
 node scripts/import-real-products.mjs
 ```

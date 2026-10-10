@@ -103,11 +103,6 @@ function noteSearchDown(reason: string) {
   )
 }
 
-/** 供测试清理熔断状态。 */
-export function resetSearchBreaker() {
-  searchDownUntil = 0
-}
-
 /**
  * 搜索链路当前是否被判定为不通。
  *
