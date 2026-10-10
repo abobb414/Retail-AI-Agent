@@ -2,6 +2,32 @@
 
 本文档记录 `Retail-AI-Agent` 的重要迭代。
 
+## [2026-10-10 · 夜] — 对话链路：工具调用协议标记泄漏进文案（工单 `2026-10-10-dialogue-bugfix-ticket.md`）
+
+用户原话：
+
+> 这个是现在的一个问题我写了一个工单
+
+依据：用例 01（服饰/跑步鞋）偶发整屏乱码且不出卡，正文是模型吐出的 DSML 工具调用原文（`<｜｜DSML｜｜ calls>`）。
+后端只认标准 `tool_calls`，认不出这段文本，于是它沿「模型没返回 JSON」的兜底分支被当成追问正文原样发给用户。
+
+修复（`frontend/server/utils/llmBuyer.ts`）：
+- 新增 `stripToolProtocol` / `hasToolProtocol`，同时覆盖全角 `｜` 与半角 `|`，`<` 前缀可有可无。
+- `sanitizeCopyText`（所有文案的统一清洗入口）先剥协议文本，兜住任何遗漏路径。
+- `finalizeWithJson` 的追问回收点先剥再判断；剥完为空则判为本轮失败，走既有失败路径，不再当追问发出。
+- 首轮 JSON 失败的重试：若正文含协议标记，重试提示里明确禁止输出标记，回灌的上文也先剥掉协议文本。
+- 剥离顺序修正（依据 `.workbuddy/handoff/2026-10-10-strip-tool-protocol-error-detail.md`）：原实现的尾部正则 `[\s\S]*` 贪婪到结尾，会把「泄漏块后面的人话」一起删掉，导致本可正常回复的轮次变成空文案、走失败路径。现拆成三步：闭合块 → 单行「标签+内容+闭标签」→ 零散标签（只到 `>`）→ 真·未闭合尾部（到结尾）。
+- 修法比交接文档多出一步：文档方案漏了「单行参数块」（`<｜｜DSML｜｜ parameter …>查询词</｜｜DSML｜｜ parameter>`）。按文档改后，查询词与闭标签残片会留在文案里，`scripts/test-tool-protocol.mjs` 5 例失败，据此补上 `DSML_INLINE_PARAM`。
+
+测试脚本（`scripts/test-natural-dialogues.mjs`，工单问题 2）：
+- 废弃 `noProduct` / `clarification` 字段与对应断言。它们假设「库里有没有」，而主链路是全网检索，这个前提不成立。
+- 新断言：商品卡必须带 `source_url`；没有商品卡时必须是一句追问（含问号）。两者任一即为正确结果。
+- 新增断言：正文不得出现 DSML 标记或 `invoke name=`（问题 1 的回归）。
+
+验证：
+- 离线：`stripToolProtocol` 5 组用例（全角/半角纯协议、前置人话、闭合块后有人话、正常追问不变）+ `hasToolProtocol` / `sanitizeCopyText` 通过。
+- 既有回归：`test-net-guard.mjs` 61 例、`test-llm-lines.mjs` 13 例、`test-catalog-intent.mjs` 通过；`nuxi build` 通过、无 warning。
+- **未验证**：工单要求的「用例 01 连跑 ≥10 次零泄漏」与线上 30 例回归，需要真实大模型与外网，沙箱无法执行，待部署后跑。
 ## [2026-10-10 · 傍晚] — 收尾三件：HEAD 状态码改回 200、.gitignore 补缺口、根 Worker 首次发版
 
 用户原话：

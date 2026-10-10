@@ -424,9 +424,43 @@ function createImageJudge(
     )
 }
 
+/**
+ * 工具调用协议标记（DeepSeek 的 DSML 等）。
+ *
+ * 模型偶尔不走标准 `tool_calls` 字段，而是把调用原文直接写进正文。后端只认标准字段，
+ * 认不出它，于是这段协议文本会被当成人话发给用户。竖线可能是全角 `｜`（U+FF5C）或半角 `|`。
+ *
+ * 剥离分三步，顺序不能乱：
+ *   1. 闭合块（开标签 … 闭标签）：非贪婪取最短，整块吃掉；
+ *   2. 零散标签（如孤立的 `</｜｜DSML｜｜ invoke>`）：只吃到下一个 `>`，绝不越过；
+ *   3. 真·未闭合尾部（到字符串结尾都没有 `>`）：才吃到结尾。
+ * 若把第 3 步提前或让第 2 步贪婪，协议块后面的人话会被一起删掉。
+ */
+const DSML_CLOSED_BLOCK = /<?[｜|]{1,2}DSML[｜|]{1,2}[\s\S]*?[｜|]{1,2}DSML[｜|]{1,2}>/g
+// 单行的「开标签 + 内容 + 闭标签」，如 `<｜｜DSML｜｜ parameter name="q">跑鞋</｜｜DSML｜｜ parameter>`。
+// 文档里的修法漏了这一种：CLOSED_BLOCK 要求两个 DSML 跨越多行配对，装不下参数内容。
+// 闭标签前可能有 `/`，所以 `<?` 之前不能直接当作标签起点。
+const DSML_INLINE_PARAM = /<?[｜|]{1,2}DSML[｜|]{1,2}[^>\n]*>[^<\n]*<\/?[｜|]{1,2}DSML[｜|]{1,2}[^>\n]*>/g
+const DSML_TAG = /<?\/?[｜|]{1,2}DSML[｜|]{1,2}[^>]*>/g
+const DSML_OPEN_TAIL = /<?[｜|]{1,2}DSML[｜|]{1,2}[\s\S]*/
+
+export function hasToolProtocol(text: string) {
+  return DSML_OPEN_TAIL.test(text)
+}
+
+/** 剥掉工具调用协议文本，保留它前后的人话。 */
+export function stripToolProtocol(text: string) {
+  return text
+    .replace(DSML_CLOSED_BLOCK, '')
+    .replace(DSML_INLINE_PARAM, '')
+    .replace(DSML_TAG, '')
+    .replace(DSML_OPEN_TAIL, '')
+    .trim()
+}
+
 export function sanitizeCopyText(value: unknown) {
   return typeof value === 'string'
-    ? value
+    ? stripToolProtocol(value)
         .replace(/您/g, '你')
         .replace(/亲爱的用户/g, '')
         .replace(/欢迎来到[^，,。!！]*[，,。!！\s]*/g, '')
@@ -1180,15 +1214,21 @@ async function finalizeWithJson(
       `[llmBuyer] ${provider.label} 首轮未返回可解析 JSON（finish_reason=${finishReason || 'unknown'}，长度=${content.length}），触发重试`,
     )
 
+    // 模型把工具调用协议当正文吐出来时，明确告诉它别再这样做；回灌的上文也先剥掉协议文本，
+    // 免得把这个坏模式原样放大。
+    const leakedProtocol = hasToolProtocol(content)
     const retryMessages: ChatMessage[] = [
       ...messages,
       {
         role: 'assistant',
-        content: content.trim().slice(0, 600) || '（上一轮未按要求输出 JSON）',
+        content: stripToolProtocol(content.trim()).slice(0, 600) || '（上一轮未按要求输出 JSON）',
       },
       {
         role: 'user',
-        content: '只输出上面要求的那一个 JSON 对象。不要任何解释文字，不要 markdown 代码块。',
+        content: [
+          leakedProtocol ? '不要输出任何工具调用标记（如 DSML、invoke 等）。' : '',
+          '只输出上面要求的那一个 JSON 对象。不要任何解释文字，不要 markdown 代码块。',
+        ].filter(Boolean).join(''),
       },
     ]
 
@@ -1221,7 +1261,9 @@ async function finalizeWithJson(
     // 也就是说模型在「该定品还是该追问」上本身就不稳，它有时直接用自然语言问你一句。
     // 这时把整条请求判成 503「买手大模型暂时不可用」是**误报** —— 模型好得很，
     // 只是没吐 JSON。用户该看到的是那句追问，而不是一个错误页。
-    const prose = content.trim()
+    // 协议文本不是人话：先剥掉再判断。剥完为空 ⇒ 这一轮模型只吐了工具调用，没给出能说的内容，
+    // 判为本轮失败（走上面 throw 的失败路径），而不是当成追问发给用户。
+    const prose = stripToolProtocol(content.trim())
 
     if (prose.length > 0) {
       console.warn(
