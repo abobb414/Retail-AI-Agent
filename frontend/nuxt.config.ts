@@ -59,6 +59,10 @@ export default defineNuxtConfig({
         { rel: 'icon', type: 'image/png', href: '/favicon.png?v=20260930b' },
         { rel: 'apple-touch-icon', sizes: '180x180', href: '/apple-touch-icon.png?v=20260930b' },
       ],
+      script: [
+        // Vercel Web Analytics：需在 Vercel 项目里开启 Analytics 后该脚本才可用
+        { src: '/_vercel/insights/script.js', defer: true },
+      ],
     },
   },
 })

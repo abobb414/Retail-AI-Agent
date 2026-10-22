@@ -2,6 +2,26 @@
 
 本文档记录 `Retail-AI-Agent` 的重要迭代。
 
+## [2026-10-23] — 接入 Vercel Web Analytics 站点统计
+
+用户原话：
+
+> 我应该开启了昨天
+>
+> 你帮我去看看
+
+依据：用户希望用 Vercel 后台看站点访问数据。排查发现项目 `abobb/frontend`（域名 `retail.abobb.com`）的 Web Analytics **已开启**（Analytics 操作菜单显示「Disable Web Analytics」），但面板停留在 Get Started 引导，从未收到数据。
+
+排查结论：
+- 线上部署仍停留在 2026-10-10 的提交，HTML 中没有统计脚本。
+- `https://retail.abobb.com/_vercel/insights/script.js` 返回 404；对照站 `weather.abobb.com`、`start.abobb.com` 同一路径返回 200 —— 开启 Analytics 后需重新部署，Vercel 才会提供该脚本。
+
+改动（`frontend/nuxt.config.ts`）：
+- `app.head.script` 追加 `{ src: '/_vercel/insights/script.js', defer: true }`。
+- 站点只有 `pages/index.vue` 单一路由，无需额外处理 SPA 内部路由的 pageview 上报。
+
+验证：推送 `main` 触发 Production 部署后，脚本端点应返回 200，Analytics 面板开始出数。
+
 ## [2026-10-10 · 深夜] — 启用 GitHub → Vercel 自动部署
 
 用户原话：
