@@ -16,7 +16,7 @@ interface ChatRequest {
   messages?: IncomingMessage[]
 }
 
-/** Worker 端返回的商品结构（对应仓库根目录 index.ts 的 rag_recommendation 分支）。 */
+/** Worker 端返回的商品结构（对应 worker/index.ts 的 rag_recommendation 分支）。 */
 interface WorkerRecommendedProduct {
   id: string
   name: string

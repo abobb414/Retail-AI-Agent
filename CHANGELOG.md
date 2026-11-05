@@ -2,6 +2,22 @@
 
 本文档记录 `Retail-AI-Agent` 的重要迭代。
 
+## [2026-11-05] — 目录结构：Worker 代码收进 `worker/`
+
+用户原话：
+
+> 那就只做第一条
+
+背景：根目录同时充当 Worker 项目根与前端 Monorepo 根，`index.ts` / `catalogTaxonomy.ts` / `wrangler.jsonc` / `migrations/` 平铺在根，与 `frontend/` 混在一起。
+
+改动：
+- 上述文件原样移入 `worker/`（`git mv` 保留历史）：`worker/index.ts`、`worker/catalogTaxonomy.ts`、`worker/wrangler.jsonc`、`worker/migrations/`。
+- `worker/wrangler.jsonc` 的 `$schema` 改指 `../node_modules/wrangler/config-schema.json`；`main` 仍为 `index.ts`（wrangler 相对配置文件解析）。
+- 部署命令改为 `npx wrangler deploy --config worker/wrangler.jsonc`（`secret put` 同理），README 中英文版同步。
+- `scripts/test-catalog-intent.mjs` 的动态导入改为 `../worker/…`。
+
+未做（明确取舍）：不引入 npm/pnpm workspace。前后端没有共享包、部署链路相互独立，加 workspace 只会多一份根级 lockfile 和心智成本。
+
 ## [2026-10-23] — 接入 Vercel Web Analytics 站点统计
 
 用户原话：

@@ -202,8 +202,8 @@ The design principle is that **every block can degrade independently** — any e
 - **Outbound jitter**: backoff retries → circuit breaker cooldown → fallback
 - **Frontend**: only when both pipelines are down does it return 503, and it reports each pipeline's failure reason separately
 
-> ⚠️ The backend (the Worker in `index.ts` + D1 + Vectorize) lives in this repo but is an **independent Cloudflare project**,
-> deployed separately via `wrangler.jsonc`, decoupled from the frontend on Vercel.
+> ⚠️ The backend (the Worker in `worker/index.ts` + D1 + Vectorize) lives in this repo but is an **independent Cloudflare project**,
+> deployed separately via `worker/wrangler.jsonc`, decoupled from the frontend on Vercel.
 
 ### Request flow priority
 
@@ -258,8 +258,8 @@ npm run dev            # → http://127.0.0.1:3000
 Worker (optional — only if you want to modify the fallback pipeline):
 
 ```bash
-npx wrangler deploy --dry-run   # dry-run first
-npx wrangler deploy
+npx wrangler deploy --dry-run --config worker/wrangler.jsonc   # dry-run first
+npx wrangler deploy --config worker/wrangler.jsonc
 ```
 
 Production build check:
@@ -336,12 +336,13 @@ node scripts/probe-vision.mjs <baseUrl> <apiKey> <model> [imagePath]
 
 ```text
 .
-├── index.ts                         # Cloudflare Worker: import, cleaning, RAG retrieval, product locking
-├── wrangler.jsonc                   # Worker / D1 / Vectorize / Workers AI bindings
-├── catalogTaxonomy.ts               # Product category and attribute vocabularies
-├── migrations/
-│   ├── 001_expand_products_for_rag.sql
-│   └── 002_catalog_facets.sql
+├── worker/                          # Cloudflare Worker (deployed independently, decoupled from Vercel)
+│   ├── index.ts                     # Worker: import, cleaning, RAG retrieval, product locking
+│   ├── wrangler.jsonc               # Worker / D1 / Vectorize / Workers AI bindings
+│   ├── catalogTaxonomy.ts           # Product category and attribute vocabularies
+│   └── migrations/
+│       ├── 001_expand_products_for_rag.sql
+│       └── 002_catalog_facets.sql
 ├── scripts/                         # Tests, import, probes (see scripts/README.md)
 │   ├── system-test.mjs              # System test: 7 scenarios, 30 assertions
 │   ├── test-natural-dialogues.mjs   # Offline regression: 30 natural-dialogue cases
@@ -409,7 +410,7 @@ WORKER_RESOLVE_IP=
 
 ### Worker Bindings
 
-Configured in [`wrangler.jsonc`](wrangler.jsonc):
+Configured in [`worker/wrangler.jsonc`](worker/wrangler.jsonc):
 
 | Binding | Resource |
 |---|---|
@@ -420,7 +421,7 @@ Configured in [`wrangler.jsonc`](wrangler.jsonc):
 
 ```bash
 # The ingest endpoint only accepts requests carrying an x-ingest-token header, so set the secret first
-npx wrangler secret put INGEST_TOKEN
+npx wrangler secret put INGEST_TOKEN --config worker/wrangler.jsonc
 ```
 
 > The workers.dev URL is publicly reachable, and every POST other than `/api/chat` lands in the ingest
@@ -521,8 +522,8 @@ See [scripts/README.md](scripts/README.md) for detailed parameters.
 cd frontend && vercel deploy --prod --yes
 
 # Worker (set the ingest passphrase before the first deploy, or ingest rejects everything)
-npx wrangler secret put INGEST_TOKEN
-npx wrangler deploy
+npx wrangler secret put INGEST_TOKEN --config worker/wrangler.jsonc
+npx wrangler deploy --config worker/wrangler.jsonc
 ```
 
 ---

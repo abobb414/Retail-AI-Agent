@@ -10,7 +10,7 @@ node scripts/import-real-products.mjs
 
 The Worker rejects ingest requests without a matching `x-ingest-token` header
 (and refuses all ingest when `INGEST_TOKEN` is not set on the Worker). Set it
-once with `wrangler secret put INGEST_TOKEN`.
+once with `wrangler secret put INGEST_TOKEN --config worker/wrangler.jsonc`.
 
 The script reads `frontend/server/data/realProducts.json`, merges structured
 facets from `frontend/server/data/productFacets.json` by product ID, splits the

@@ -2,8 +2,8 @@
 
 import assert from "node:assert/strict";
 
-const { detectRequestProfile } = await import("../catalogTaxonomy.ts");
-const { buildNoMatchResponse, getClarificationReply } = await import("../index.ts");
+const { detectRequestProfile } = await import("../worker/catalogTaxonomy.ts");
+const { buildNoMatchResponse, getClarificationReply } = await import("../worker/index.ts");
 
 const cases = [
   ["Lululemon男士夏季运动服", { department: "apparel", brand: "Lululemon", gender: "male" }],

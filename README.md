@@ -202,8 +202,8 @@ flowchart TD
 - **出网抖动**：退避重试 → 熔断冷却 → 降级
 - **前端**：只有两条链路同时不可用才 503，且分别给出两条链路的失败原因
 
-> ⚠️ 后端（`index.ts` 的 Worker + D1 + Vectorize）虽在本仓库内，但是**独立的 Cloudflare 项目**，
-> 通过 `wrangler.jsonc` 单独部署，与 Vercel 上的前端解耦。
+> ⚠️ 后端（`worker/index.ts` 的 Worker + D1 + Vectorize）虽在本仓库内，但是**独立的 Cloudflare 项目**，
+> 通过 `worker/wrangler.jsonc` 单独部署，与 Vercel 上的前端解耦。
 
 ### 链路优先级
 
@@ -258,8 +258,8 @@ npm run dev            # → http://127.0.0.1:3000
 Worker（可选，只在你要改兜底链路时）：
 
 ```bash
-npx wrangler deploy --dry-run   # 先干跑
-npx wrangler deploy
+npx wrangler deploy --dry-run --config worker/wrangler.jsonc   # 先干跑
+npx wrangler deploy --config worker/wrangler.jsonc
 ```
 
 生产构建检查：
@@ -335,12 +335,13 @@ node scripts/probe-vision.mjs <baseUrl> <apiKey> <model> [imagePath]
 
 ```text
 .
-├── index.ts                         # Cloudflare Worker：导入、清洗、RAG 检索、商品锁定
-├── wrangler.jsonc                   # Worker / D1 / Vectorize / Workers AI 绑定
-├── catalogTaxonomy.ts               # 商品分类与属性词表
-├── migrations/
-│   ├── 001_expand_products_for_rag.sql
-│   └── 002_catalog_facets.sql
+├── worker/                          # Cloudflare Worker（独立部署，与前端解耦）
+│   ├── index.ts                     # Worker：导入、清洗、RAG 检索、商品锁定
+│   ├── wrangler.jsonc               # Worker / D1 / Vectorize / Workers AI 绑定
+│   ├── catalogTaxonomy.ts           # 商品分类与属性词表
+│   └── migrations/
+│       ├── 001_expand_products_for_rag.sql
+│       └── 002_catalog_facets.sql
 ├── scripts/                         # 测试、导入、探测（详见 scripts/README.md）
 │   ├── system-test.mjs              # 系统测试：7 场景 30 断言
 │   ├── test-natural-dialogues.mjs   # 离线回归：自然对话 30 例
@@ -405,7 +406,7 @@ WORKER_RESOLVE_IP=
 
 ### Worker Bindings
 
-在 [`wrangler.jsonc`](wrangler.jsonc) 中配置：
+在 [`worker/wrangler.jsonc`](worker/wrangler.jsonc) 中配置：
 
 | Binding | 资源 |
 |---|---|
@@ -416,7 +417,7 @@ WORKER_RESOLVE_IP=
 
 ```bash
 # 入库接口只认带 x-ingest-token 头的请求，先设口令再部署
-npx wrangler secret put INGEST_TOKEN
+npx wrangler secret put INGEST_TOKEN --config worker/wrangler.jsonc
 ```
 
 > 这是个公开可访问的 workers.dev 地址，而 `/api/chat` 之外的任何 POST 都会落到入库逻辑。
@@ -510,8 +511,8 @@ WORKER_URL=https://<worker> INGEST_TOKEN=<same as the Worker secret> \
 cd frontend && vercel deploy --prod --yes
 
 # Worker（首次部署前先设入库口令，否则入库接口会整体拒绝）
-npx wrangler secret put INGEST_TOKEN
-npx wrangler deploy
+npx wrangler secret put INGEST_TOKEN --config worker/wrangler.jsonc
+npx wrangler deploy --config worker/wrangler.jsonc
 ```
 
 ---
