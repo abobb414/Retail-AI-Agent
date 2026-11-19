@@ -251,7 +251,7 @@ Frontend:
 ```bash
 cd frontend
 npm install
-cp .env.example .env   # fill in LLM_API_KEY, etc.
+cp .env.example .env   # fill in DEEPSEEK_API_KEY, etc.
 npm run dev            # → http://127.0.0.1:3000
 ```
 
@@ -387,11 +387,13 @@ node scripts/probe-vision.mjs <baseUrl> <apiKey> <model> [imagePath]
 ### Frontend / Vercel
 
 ```env
-# Primary: buyer product-locking LLM (OpenAI-compatible endpoint)
-LLM_API_KEY=your_llm_api_key
-LLM_BASE_URL=https://e-flowcode.cc/v1
-LLM_MODEL=deepseek-v4.1-flash
+# Product-locking LLM: DeepSeek official endpoint (OpenAI-compatible + server-side web search)
+DEEPSEEK_API_KEY=your_deepseek_api_key
+DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
+DEEPSEEK_MODEL=deepseek-flash        # model ID, not the display name
 LLM_TIMEOUT_MS=40000
+# 1 = declare deepseek_web_search (search runs on DeepSeek's side); 0 = Tavily client-side search
+LLM_WEB_SEARCH=1
 
 # Product image visual QC: candidate images are actually sent to a multimodal model
 # to judge watermark / model match / whether it's a real product photo.
@@ -400,6 +402,10 @@ IMAGE_JUDGE=1
 IMAGE_JUDGE_MODEL=                 # leave empty to reuse LLM_MODEL
 IMAGE_JUDGE_TIMEOUT_MS=12000
 
+# Optional image search: the native web tool returns no image list, so official-domain
+# product-image discovery still uses Tavily
+TAVILY_API_KEY=
+
 # 🔴 Fallback: catalog pipeline (takes over product locking when the LLM is unavailable,
 # guaranteeing a card can still be produced). This is the safety net — don't delete it.
 WORKER_CHAT_URL=https://retail-ai-agent-worker.abobb-retail-ai-agent.workers.dev/api/chat
@@ -407,6 +413,10 @@ WORKER_CHAT_URL=https://retail-ai-agent-worker.abobb-retail-ai-agent.workers.dev
 # For local debugging, leave empty to use normal DNS
 WORKER_RESOLVE_IP=
 ```
+
+> Legacy deployments: the key may stay in `LLM_FALLBACK_API_KEY`; the code reads the first
+> non-empty value of `DEEPSEEK_API_KEY → LLM_FALLBACK_API_KEY → LLM_API_KEY`.
+> The relay-era `LLM_BASE_URL` / `LLM_MODEL` / `LLM_FALLBACK_*` variables are no longer read.
 
 ### Worker Bindings
 
@@ -428,19 +438,15 @@ npx wrangler secret put INGEST_TOKEN --config worker/wrangler.jsonc
 > logic. Without a passphrase anyone could write products into D1 / Vectorize and burn embedding
 > quota, so it is better to switch the endpoint off entirely.
 
-### Model selection notes
+### Models and web search
 
-Measured latency for the same product-locking request: `deepseek-v4.1-flash` **6.2s**, `doubao-seed-2.0-lite` 6.7s,
-`qwen3.8-flash` 37.9s, `glm-5.3-flash` 39–92s (reasoning model; `max_tokens` easily gets eaten by the thinking process).
-When switching to a reasoning model, remember to raise `LLM_TIMEOUT_MS` accordingly.
-
-**Vision capability must be tested per model — don't extrapolate from the series**:
-
-| Model | Image request | Result |
-|---|---|---|
-| `glm-5.3-flash` | `image_url` (Base64 Data URL or remote URL) | ✅ Recognizes correctly; even 2MB large images get through |
-| `deepseek-v4.1-flash` | `image_url` | ✅ Recognizes correctly |
-| `glm-5.3` | `image_url` | ❌ HTTP 400 — **same family, yet no vision** |
+- Product locking uses `deepseek-flash` (DeepSeek-V4.1-Flash) on the official endpoint.
+- Web search uses the official **server-side tool** `deepseek_web_search`: searching runs on
+  DeepSeek's side and the sources come back in `server_tool_calls[].calls[].sources`;
+  the client does not execute any tool.
+- 🔴 `response_format` cannot be combined with the web tool (HTTP 400), so the pipeline is
+  "search round (the model may already emit JSON) → a separate forced-JSON round if it did not".
+- Visual QC can use `deepseek-flash` directly (`input_modalities` includes image).
 
 > `usage.prompt_tokens_details.image_tokens` is always `0` on relay stations, so it **cannot** be used to judge whether an image got through.
 > The product side currently has no image input entry (text input only), and the server doesn't assemble `image_url` content blocks either — the model being able to see images ≠ the app being able to use images.

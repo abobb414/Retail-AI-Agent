@@ -74,7 +74,7 @@ These hit a running dev server (default `http://127.0.0.1:3100`):
 node scripts/test-cold-products.mjs 3100
 node scripts/test-cold-products.mjs 3100 --only=手冲壶
 
-# 视觉能力探测（中转站上的模型到底能不能看图）
+# 视觉能力探测（OpenAI 兼容端点上的模型到底能不能看图）
 node scripts/probe-vision.mjs <baseUrl> <apiKey> <model>
 node scripts/probe-vision-sweep.mjs <baseUrl> <apiKey> <model1> <model2> ...
 ```
@@ -92,16 +92,13 @@ node scripts/system-test.mjs http://127.0.0.1:3100
 node scripts/system-test.mjs http://127.0.0.1:3100 --smoke
 
 # 兜底模式：对故障注入实例断言 engine=catalog
-# ⚠️ 必须把**备用大模型线路也一起摘掉**，否则请求会被它接住，永远落不到 Worker。
-#    2026-10-02 起存在第二条 LLM 线路（LLM_FALLBACK_*），所以「让大模型不可用」
-#    这件事现在要两条一起断：主线路 + 备用线路都不通，才是真正的 catalog 路径。
-#    先起一个两条 LLM 线路都不可达的实例：
-#   LLM_BASE_URL=http://127.0.0.1:9/v1 LLM_FALLBACK_API_KEY= HOST=127.0.0.1 PORT=3101 nuxt dev
+# ⚠️ 现在只有一条大模型线路（DeepSeek 官方），把它指到不可达地址即可：
+#   DEEPSEEK_BASE_URL=http://127.0.0.1:9/v1 HOST=127.0.0.1 PORT=3101 nuxt dev
 node scripts/system-test.mjs http://127.0.0.1:3101 --fallback
 ```
 
 退出码 0 = 全部通过；失败项会逐条列出。S4/S7 之外的场景不依赖具体模型，
 换模型、换供应商后可直接复跑。
 
-> 顺带一提：三层可用性现在是「主线路 LLM → 备用线路 LLM（换出口）→ Worker 商品库（换数据源）」。
-> 只有**三层同时**不可用才返回 503，错误文案里会把三条路各自的原因都列出来。
+> 顺带一提：可用性现在是两层「大模型（DeepSeek 官方）→ Worker 商品库（换数据源）」。
+> 两层都不可用才返回 503，错误文案里会把两条路各自的原因都列出来。

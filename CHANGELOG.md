@@ -2,6 +2,23 @@
 
 本文档记录 `Retail-AI-Agent` 的重要迭代。
 
+## [2026-11-18] — 去掉 e-flowcode 中转站，DeepSeek 官方直连 + 原生联网
+
+用户原话：
+
+> 现在deepseek 4.1不是能直接调用联网搜索功能了么，我想把我三层中间的那层中转站去掉，添加一下这个联网搜索功能
+
+改动：
+
+- **只保留 DeepSeek 官方一条模型线路**（`https://api.deepseek.com/v1` + `deepseek-flash`）。密钥优先读 `DEEPSEEK_API_KEY`，兼容旧部署的 `LLM_FALLBACK_API_KEY`（Vercel Secret 无法回读，没必要重新录）；中转站时代的 `LLM_BASE_URL` / `LLM_MODEL` / `LLM_FALLBACK_*` 不再读取。
+- **联网改为服务端工具 `deepseek_web_search`**（`thinking: disabled`）：检索由官方执行，来源从响应扩展字段 `message.server_tool_calls[].calls[].sources` 解析成 `hits`；不再需要「模型发起 function tool → 后端代搜 → `role:'tool'` 回填」那一圈。
+- 🔴 **声明联网工具后不能带 `response_format`（会 400）**。因此保留两段式：联网轮让模型尝试直接给 JSON；没给就再走一轮强制 JSON 定稿，来源摘要随定稿轮一并带上。
+- 每轮在最后一条 user 消息前注入官方 `latest_reminder`（`日期,星期,,Web,中文`），让模型正确理解「最新」是哪一年。
+- **Tavily 保留为找图源**：原生工具不返回图片列表，官方域定向找商品图与第三方候选图仍然靠它。没配 `TAVILY_API_KEY` 时少这两级，卡片更常退回品牌标。
+- 视觉质检继续复用该模型（`deepseek-flash` 支持图片输入）。
+
+取舍：少一条「换出口」的备用大模型，但这条备用与官方本来就是同一个供应商；真正的可用性保险仍是 Worker 商品库兜底，未改动。
+
 ## [2026-11-05] — 目录结构：Worker 代码收进 `worker/`
 
 用户原话：

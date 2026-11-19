@@ -1,13 +1,19 @@
 /**
- * 联网检索层：给大模型「装」一个搜索工具。
+ * 联网检索层（Tavily）。
  *
- * 背景（实测得出，别走回头路）：
- * - 本项目走的是第三方 OpenAI 兼容中转站（e-flowcode.cc）。该站**不转发**任何
- *   模型内置搜索能力：`web_search: true`（智谱 body 级）、`enable_search: true`
- *   （百炼风格）、`tools: [{ type: 'web_search' }]` 三种写法全部无效或被忽略。
- * - 但该站**完整支持标准 function calling**（`tools` + `tool_calls` + `role: 'tool'`
- *   回填，多轮闭环可用）。
- * ⇒ 所以「让模型联网」只能靠自己实现：模型决定搜什么，我们代它去搜。
+ * 2026-11 起，定品的**文字检索**交给 DeepSeek 官方服务端工具
+ * `deepseek_web_search`（见 llmBuyer.ts 的 runNativeSearchRecon）：检索在官方
+ * 执行，结构化来源随 `server_tool_calls` 返回，少一次模型往返，也不消耗 Tavily 额度。
+ *
+ * 本文件保留两个用途：
+ * 1. 不支持原生工具的出口（例如换回中转站）仍走标准 function calling 闭环；
+ * 2. **找图**。原生工具不返回图片列表，官方域定向检索商品图仍只能靠 Tavily
+ *    （`include_domains` 是实测唯一稳定拿到品牌官方商品图的方式）。
+ *
+ * 历史背景：中转站（e-flowcode.cc）不转发任何模型内置搜索能力，
+ * `web_search: true`、`enable_search: true`、`tools: [{type:'web_search'}]`
+ * 三种写法全部无效或被忽略，但标准 function calling 完整支持
+ * （`tools` + `tool_calls` + `role:'tool'` 回填）。这条老路现在只用在上面的场景 1。
  *
  * 数据源选型：免密钥的公开搜索端点（DuckDuckGo / Bing RSS / 百度 / 搜狗 /
  * 公共 SearXNG）在 2026 年已全部被反爬封死，必须用注册型搜索 API。

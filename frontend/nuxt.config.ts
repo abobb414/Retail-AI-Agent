@@ -3,42 +3,38 @@ export default defineNuxtConfig({
   modules: ['@nuxtjs/tailwindcss'],
   css: ['~/assets/css/main.css'],
   runtimeConfig: {
-    // 首选：买手定品大模型（OpenAI 兼容端点）
-    llmApiKey: process.env.LLM_API_KEY || '',
-    llmBaseUrl: process.env.LLM_BASE_URL || 'https://e-flowcode.cc/v1',
-    llmModel: process.env.LLM_MODEL || 'glm-5.3-flash',
-    // 单次定品调用上限。快模型 6~7s 就够；换成 glm-5.3-flash 这类推理模型要 40s 以上。
+    // 定品大模型：DeepSeek 官方直连（OpenAI 兼容端点）。
+    // e-flowcode 中转站已移除：它不转发模型内置联网能力，链路本身也是跨境的。
+    // 密钥沿用旧的 LLM_FALLBACK_API_KEY —— Vercel Secret 无法回读，没必要再录一遍；
+    // 新部署建议改用 DEEPSEEK_API_KEY。
+    llmApiKey: process.env.DEEPSEEK_API_KEY || process.env.LLM_FALLBACK_API_KEY || process.env.LLM_API_KEY || '',
+    llmBaseUrl: process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com/v1',
+    // ⚠️ 填的是**模型 ID**，不是控制台显示名：DeepSeek-V4.1-Flash → deepseek-flash。
+    //    传显示名会被 400 拒绝。
+    llmModel: process.env.DEEPSEEK_MODEL || 'deepseek-flash',
+    // 单次调用上限。联网那一轮包含搜索 + 读页，比纯生成慢，40s 是实测够用的值。
     llmTimeoutMs: Number(process.env.LLM_TIMEOUT_MS || 40000),
+    // 原生联网：声明 DeepSeek 的服务端工具 deepseek_web_search，由官方执行检索。
+    // 🔴 声明工具后不能再带 response_format（会 400），所以 JSON 定稿仍是单独一轮。
+    //    置 0 则退回 Tavily 代模型检索（需 TAVILY_API_KEY）。
+    llmWebSearch: process.env.LLM_WEB_SEARCH !== '0',
 
-    // ── 备用线路：第三方中转站不可用时的第二条腿（DeepSeek 官方直连）────────
-    // 🔴 与已废弃的「同站换模型」备选不是一回事：那条是同一个出口换个型号
-    //    （抖动是链路级的，换模型救不回来）；这条换的是**出口**——中转站走跨境，
-    //    官方直连在国内，两者的故障域不重叠。见 resolveProviders 的说明。
-    // 只填了 KEY 才会启用（baseUrl / model 有可用默认值，换供应商时才需要改）。
-    llmFallbackApiKey: process.env.LLM_FALLBACK_API_KEY || '',
-    llmFallbackBaseUrl: process.env.LLM_FALLBACK_BASE_URL || 'https://api.deepseek.com/v1',
-    // ⚠️ 官方端点上的模型 **ID** 是 `deepseek-flash`（显示名才叫 DeepSeek-V4.1-Flash）。
-    //    传显示名会被 400 拒掉：The supported API model names are deepseek-flash, deepseek-v4-pro.
-    llmFallbackModel: process.env.LLM_FALLBACK_MODEL || 'deepseek-flash',
-    // 备用线路单次调用上限，留空则用 LLM_TIMEOUT_MS。国内直连快，通常不必给 40s。
-    llmFallbackTimeoutMs: Number(process.env.LLM_FALLBACK_TIMEOUT_MS || 0),
     // 视觉质检：把候选商品图真的发给多模态模型看一眼再上卡片。
     // 关掉（IMAGE_JUDGE=0）则退回「只认品牌官方域名」的老规则。
     enableImageJudge: process.env.IMAGE_JUDGE !== '0',
-    // 质检单独指模型（默认复用 LLM_MODEL）。实测 deepseek-v4.1-flash 与 glm-5.3-flash 都能看图。
+    // 质检单独指模型（默认复用 LLM_MODEL）。实测 deepseek-flash 能看图。
     imageJudgeModel: process.env.IMAGE_JUDGE_MODEL || '',
     imageJudgeTimeoutMs: Number(process.env.IMAGE_JUDGE_TIMEOUT_MS || 12000),
-    // 联网检索：给大模型装的「搜索工具」数据源。
-    // 中转站不转发模型内置搜索能力，只能由我们自己代模型执行检索（见 server/utils/webSearch.ts）。
-    // 留空则跳过联网，模型退回「凭自身知识定品」。
+    // Tavily 现在只做两件事：官方域定向找商品图、第三方图候选。
+    // 文字检索交给 deepseek_web_search；这项留空时找图会少几级，最终退回品牌标。
     tavilyApiKey: process.env.TAVILY_API_KEY || '',
 
     // ── 二级兜底：Cloudflare Worker（D1 + Vectorize 商品库 RAG）──────────
     // 🔴 这是「后路」，不是可选项。大模型不可用时靠它保证站点还能出卡片。
     // ⚠️ 曾经在 2026-09-29 被误删过（当时把用户说的「api 只留 e-flowcode」
     //    过度理解成「整条兜底链路也一并摘掉」）。恢复记录见 CHANGELOG。
-    //    口径澄清：LLM_FALLBACK_*（备用**大模型**）留或不留是取舍，
-    //    Worker 兜底（换一**整套数据源**）是可用性保险，两者不是一回事。
+    //    口径澄清：大模型线路只剩 DeepSeek 一条，它挂了是「换不出模型」；
+    //    Worker 兜底是换一**整套数据源**，不依赖任何大模型，属于可用性保险。
     workerChatUrl: process.env.WORKER_CHAT_URL || '',
     // 可选：把 Worker 域名固定到这个 IP，绕开国内 DNS 解析问题（留空则正常解析）。
     workerResolveIp: process.env.WORKER_RESOLVE_IP || '',

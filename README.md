@@ -251,7 +251,7 @@ flowchart TD
 ```bash
 cd frontend
 npm install
-cp .env.example .env   # 填入 LLM_API_KEY 等
+cp .env.example .env   # 填入 DEEPSEEK_API_KEY 等
 npm run dev            # → http://127.0.0.1:3000
 ```
 
@@ -386,11 +386,13 @@ node scripts/probe-vision.mjs <baseUrl> <apiKey> <model> [imagePath]
 ### 前端 / Vercel
 
 ```env
-# 首选：买手定品大模型（OpenAI 兼容端点）
-LLM_API_KEY=your_llm_api_key
-LLM_BASE_URL=https://e-flowcode.cc/v1
-LLM_MODEL=deepseek-v4.1-flash
+# 定品大模型：DeepSeek 官方直连（OpenAI 兼容端点 + 服务端联网）
+DEEPSEEK_API_KEY=your_deepseek_api_key
+DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
+DEEPSEEK_MODEL=deepseek-flash        # 填模型 ID，不是控制台显示名
 LLM_TIMEOUT_MS=40000
+# 1 = 声明 deepseek_web_search，由官方执行检索；0 = 退回 Tavily 代搜
+LLM_WEB_SEARCH=1
 
 # 商品图视觉质检：把候选图真的发给多模态模型判断水印 / 型号 / 是否商品实拍
 # 置 0 则关闭，退回「只认品牌官方域名」的老规则
@@ -398,11 +400,18 @@ IMAGE_JUDGE=1
 IMAGE_JUDGE_MODEL=                 # 留空则复用 LLM_MODEL
 IMAGE_JUDGE_TIMEOUT_MS=12000
 
+# 找图用（可选）：原生联网不返回图片列表，官方域定向找商品图仍靠 Tavily
+TAVILY_API_KEY=
+
 # 🔴 兜底：商品库链路（大模型不可用时接手定品，保证还能出卡片）。这是后路，别删。
 WORKER_CHAT_URL=https://retail-ai-agent-worker.abobb-retail-ai-agent.workers.dev/api/chat
 # 可选：把 Worker 域名固定到该 IP，绕开国内 DNS 解析问题。本地调试建议留空走正常 DNS
 WORKER_RESOLVE_IP=
 ```
+
+> 兼容旧部署：密钥也可以继续放在 `LLM_FALLBACK_API_KEY`，代码按
+> `DEEPSEEK_API_KEY → LLM_FALLBACK_API_KEY → LLM_API_KEY` 取第一个非空值。
+> 中转站时代的 `LLM_BASE_URL` / `LLM_MODEL` / `LLM_FALLBACK_*` 已不再读取。
 
 ### Worker Bindings
 
@@ -423,22 +432,14 @@ npx wrangler secret put INGEST_TOKEN --config worker/wrangler.jsonc
 > 这是个公开可访问的 workers.dev 地址，而 `/api/chat` 之外的任何 POST 都会落到入库逻辑。
 > 没有口令的话，任何人都能往 D1 / Vectorize 写商品并消耗 embedding 额度，所以宁可整体关掉。
 
-### 模型选型参考
+### 模型与联网
 
-同一份定品请求的实测耗时：`deepseek-v4.1-flash` **6.2s**、`doubao-seed-2.0-lite` 6.7s、
-`qwen3.8-flash` 37.9s、`glm-5.3-flash` 39～92s（推理型，`max_tokens` 易被思考过程吃光）。
-换成推理型模型时记得同步调大 `LLM_TIMEOUT_MS`。
-
-**视觉能力要逐型号实测，别按系列推断**：
-
-| 模型 | 带图请求 | 结果 |
-|---|---|---|
-| `glm-5.3-flash` | `image_url`（Base64 Data URL 或远程 URL） | ✅ 正常识别，2MB 大图也能进 |
-| `deepseek-v4.1-flash` | `image_url` | ✅ 正常识别 |
-| `glm-5.3` | `image_url` | ❌ HTTP 400 —— **同族却没有视觉** |
-
-> `usage.prompt_tokens_details.image_tokens` 在中转站上恒为 `0`，**不能**用来判断图有没有进去。
-> 产品侧目前还没有图片输入入口（仅文本输入），服务端也不组装 `image_url` 内容块 —— 模型能看图 ≠ 应用能用图。
+- 定品只走 `deepseek-flash`（即 DeepSeek-V4.1-Flash），国内直连。
+- 联网用官方**服务端工具** `deepseek_web_search`：检索在 DeepSeek 侧执行，
+  来源以 `server_tool_calls[].calls[].sources` 返回，不需要客户端代搜。
+- 🔴 声明联网工具时**不能**带 `response_format`（会 400），所以流程是
+  「联网轮（模型可能直接给出 JSON）→ 没给出时再走一轮强制 JSON 定稿」。
+- 视觉质检直接用 `deepseek-flash` 即可（模型列表 `input_modalities` 含 image）。
 
 ---
 

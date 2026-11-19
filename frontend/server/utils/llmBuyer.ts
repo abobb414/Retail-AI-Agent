@@ -8,9 +8,10 @@
  *    ⇒ max_tokens 给足，并且遇到 length 截断要自动重试加长。
  * 2. 模型偶尔会把 JSON 包在 ``` 里，或前后带解释文字 ⇒ 做容错解析。
  * 3. 连续失败要熔断：否则每条消息都白等一个超时，兜底链路形同虚设。
- * 4. **联网靠自建工具**：中转站不转发任何模型内置搜索能力，但支持标准
- *    function calling。所以流程是「模型决定搜什么 → 我们代它搜 → 结果回填
- *    → 模型二次调用完成定品」。见 webSearch.ts 的说明。
+ * 4. **联网走 DeepSeek 官方服务端工具**：请求里声明 `deepseek_web_search`，
+ *    检索由官方执行，结果以 `server_tool_calls[].calls[].sources` 回到客户端。
+ *    代价是声明工具时不能带 `response_format`（400），所以定稿仍单独走一轮 JSON。
+ *    旧的中转站 + Tavily 代搜路径保留给不支持原生工具的出口（见 webSearch.ts）。
  */
 
 import { verifyProductSource, type ImageFrom, type ImageJudgeFn, type ImageJudgeRequest } from './sourcePage'
@@ -117,6 +118,8 @@ interface CompletionResult {
   content: string
   finishReason: string
   toolCalls: ToolCall[]
+  /** DeepSeek 服务端工具的执行记录（`message.server_tool_calls`）；普通出口为空数组。 */
+  serverToolCalls: unknown[]
 }
 
 /** 单次大模型调用上限（毫秒）。推理模型首字慢，给太短会必然失败。 */
@@ -234,7 +237,12 @@ const WEB_SEARCH_TOOL = {
   },
 }
 
-/** 日期必须写进系统提示：否则模型会拿训练截止年份去检索（实测搜出「…价格 2025」）。 */
+/** DeepSeek 官方服务端联网工具：检索在服务端执行，客户端只声明它。 */
+const NATIVE_WEB_SEARCH_TOOL = { type: 'deepseek_web_search' }
+
+/**
+ * 日期必须写进系统提示：否则模型会拿训练截止年份去检索（实测搜出「…价格 2025」）。
+ */
 function todayLabel() {
   const now = new Date()
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
@@ -260,17 +268,17 @@ function buildSystemPrompt() {
   '- 预算或可接受的价格带',
   '- 会彻底改变选型的硬约束：服饰鞋帽要人群/性别与尺码；家电家具要空间尺寸或安装条件',
   '一次只问一个问题，问最影响结果的那一个。不要罗列清单，不要一次问三件事，不要在这时给出任何商品。',
-  '⚠️ **判定为 clarify 时，绝对不要调用 web_search**。追问阶段搜索等于白烧额度，没有任何收益。',
+  '⚠️ **判定为 clarify 时，绝对不要联网检索**。追问阶段搜索等于白烧额度，没有任何收益。',
   '',
   '## 可以直接定品（action = "recommend"）',
   '信息足够时，锁定【有且只有一款】商品，并遵守：',
   '- 必须是真实存在、当前在售的具体型号，「品牌 + 型号/系列名」要对得上，不能拼凑',
-  '- 决定 recommend 之前，**先调用 web_search 核对**：该型号是否真实在售、当前大致售价、官方页面地址（建议 2~3 个 query 并行）',
+  '- 决定 recommend 之前，**必须先真的发起联网检索**（平台已开启 DeepSeek 联网搜索）：核对型号是否真实在售、当前大致售价、官方页面地址。不要凭记忆跳过检索',
   '- 严禁编造型号、虚构参数、虚构价格；核实不到就退到你最有把握的经典型号',
   '- price_display 给参考价，形如「¥899 左右」或「约 ¥1,299」；不确定就写「约 ¥xxx」',
   '',
   '## 关于 source_url 与 image（重要）',
-  '- source_url：从检索结果的 results[].url 里挑**该型号的官方商品页**（品牌官网 / 官方旗舰店优先，其次可信媒体页），原样复制那个 url，不要自己拼接或改动',
+  '- source_url：从联网来源（results[].url）里挑**该型号的官方商品页**（品牌官网 / 官方旗舰店优先，其次可信媒体页），原样复制那个 url，不要自己拼接或改动',
   '- image：**一律留空字符串**。商品图由后端从 source_url 回抓 og:image，你不需要、也不要猜图片地址',
   '- 检索结果里没有合适的官方页时，source_url 也留空 —— 宁可为空，绝不凭记忆编造 URL（编造的链接点开就是 404）',
   '',
@@ -296,54 +304,34 @@ function buildSystemPrompt() {
 }
 
 /**
- * 定品 provider —— **数组顺序即优先级**。
+ * 定品 provider —— 现在只有 DeepSeek 官方一条。
  *
- * 1️⃣ 主线路：`LLM_BASE_URL`（第三方中转站，本项目用 e-flowcode）
- * 2️⃣ 备用线路：`LLM_FALLBACK_BASE_URL`（DeepSeek 官方直连），仅当配了 KEY 时追加
+ * 2026-11 去掉 e-flowcode 中转站，换的不是「少一条备用」，而是整条链路：
+ * 中转站不转发模型内置联网（只能我们代模型搜），官方直连则支持
+ * `deepseek_web_search` 服务端工具。原来跨境链路的故障域随之消失；
+ * 可用性保险仍然由 Cloudflare Worker 商品库兜底承担。
  *
- * ⚠️ 这里 2026-09-29 删过一次备用项、2026-10-02 又加回来。不是反复横跳，
- *    是**备胎的性质变了**，两者的区别正好是"该不该留"的判据：
- *    · 删掉的那个 = **同一个中转站换个型号**。抖动是链路级的（出海口被干扰），
- *      换模型救不回来，只让用户多等一个完整超时（实测 40s）。
- *    · 现在这个 = **换出口**。中转站走跨境，官方直连在国内，故障域不重叠。
- *      10-02 的排障恰好证明这类故障是真实且高频的：跨境长连接在 30~58s 之间被掐
- *      （UND_ERR_SOCKET / ERR_SSL_DECRYPTION_FAILED_OR_BAD_RECORD_MAC），
- *      而同期国内站点空闲 45s 稳定。**换国内出口是真的能救的。**
- *
- * 失败切换不需要额外代码：decideProductWithLlm 本来就是「按顺序试，抛错就下一条」。
- * 熔断器按 label 分组，于是「主线路连挂 3 次 → 之后 90s 内所有请求直奔官方」也是自动的。
+ * `nativeWebSearch` 只对官方域名开启：别的 OpenAI 兼容出口收到
+ * `tools: [{type: 'deepseek_web_search'}]` 轻则忽略、重则 400，不能按工具名硬发。
  */
-export function resolveProviders(config: ReturnType<typeof useRuntimeConfig>): LlmProvider[] {
-  const providers: LlmProvider[] = []
+function isNativeWebSearchEndpoint(baseUrl: string) {
+  return safeHostname(baseUrl) === 'api.deepseek.com'
+}
 
-  if (config.llmApiKey && config.llmBaseUrl && config.llmModel) {
-    providers.push({
+export function resolveProviders(config: ReturnType<typeof useRuntimeConfig>): LlmProvider[] {
+  if (!config.llmApiKey || !config.llmBaseUrl || !config.llmModel) {
+    return []
+  }
+
+  return [
+    {
       label: config.llmModel,
       baseUrl: config.llmBaseUrl,
       apiKey: config.llmApiKey,
       model: config.llmModel,
-    })
-  }
-
-  const fallbackKey = config.llmFallbackApiKey
-  const fallbackBaseUrl = config.llmFallbackBaseUrl
-  const fallbackModel = config.llmFallbackModel
-
-  if (fallbackKey && fallbackBaseUrl && fallbackModel) {
-    // label 同时是熔断器的分组键 —— 两条线路重名会把彼此的失败算到同一个熔断器上
-    // （后果是「官方明明好好的却被跟着一起拉黑 90s」）。重名时补出口域名区分开。
-    const duplicated = providers.some((provider) => provider.label === fallbackModel)
-
-    providers.push({
-      label: duplicated ? `${fallbackModel}@${safeHostname(fallbackBaseUrl) || 'fallback'}` : fallbackModel,
-      baseUrl: fallbackBaseUrl,
-      apiKey: fallbackKey,
-      model: fallbackModel,
-      timeoutMs: Number(config.llmFallbackTimeoutMs) || undefined,
-    })
-  }
-
-  return providers
+      nativeWebSearch: Boolean(config.llmWebSearch) && isNativeWebSearchEndpoint(config.llmBaseUrl),
+    },
+  ]
 }
 
 export function hasLlmProvider(config: ReturnType<typeof useRuntimeConfig>) {
@@ -353,27 +341,20 @@ export function hasLlmProvider(config: ReturnType<typeof useRuntimeConfig>) {
 /**
  * 视觉质检用的 provider。
  *
- * 默认复用定品的那条链路，但**会挑一条不在熔断期里的**。这一步是必要的：
- * 质检是「每张候选图一次多模态调用」，主线路被跨境干扰打挂时若还硬走它，
- * 结果就是每张图白等一个 12s 超时直到预算耗尽，卡片全退成品牌标兜底。
- * 备用线路的 `deepseek-flash` 实测**同样能读图**（官方模型列表里
- * `input_modalities: ["text","image"]`），所以这个降级是实打实的。
+ * 优先跟着**刚刚定品成功的那条线路**走：如果定品期间它进过熔断，
+ * 质检再往同一条路上打，就是每张候选图白等一个 12s 超时直到预算耗尽。
+ * `deepseek-flash` 实测能读图（模型列表 `input_modalities: ["text","image"]`）。
  *
- * `IMAGE_JUDGE_MODEL` 只在主线路出口上生效 —— 它的口径是「同一家换个型号」
- * （定品用快模型、质检用好模型），而备用出口是另一家供应商，不一定有那个型号。
+ * `IMAGE_JUDGE_MODEL` 是「同一家换个型号」用的（定品用快模型、质检用好模型），
+ * 所以只覆盖 model，不换出口。
  */
 export function resolveVisionProvider(
   config: ReturnType<typeof useRuntimeConfig>,
   activeProvider?: LlmProvider,
 ): LlmProvider | null {
-  const [primary, ...rest] = resolveProviders(config)
-
-  // 🔴 优先跟着**刚刚定品成功的那条线路**走，不能只看熔断状态。
-  //    熔断阈值是「连续 3 次」，主线路第一次失败就会把定品切给备用 —— 此时它还没进冷却期。
-  //    质检若照旧走它，每张候选图白等一个 12s 超时直到预算耗尽，卡片全退成品牌标兜底。
-  //    （2026-10-02 故障注入时实测到的就是这个：定品已落到官方，质检还在往死线路上打。）
+  const primary = resolveProviders(config)[0]
   const active =
-    activeProvider ?? [primary, ...rest].find((provider) => provider && !isProviderCoolingDown(provider.label))
+    activeProvider ?? (primary && !isProviderCoolingDown(primary.label) ? primary : null)
 
   if (!active) {
     return null
@@ -393,8 +374,8 @@ export function resolveVisionProvider(
  * 上层据此退回「只认品牌官方域名」的老规则 —— 两条路径都必须能跑，
  * 因为视觉质检是可选增强，不该成为链路能不能用的前提。
  *
- * `activeProvider` 传「本次定品实际成功的那条线路」：定品已经切到备用线路时，
- * 质检也必须一起切，否则等于拿一条已知不通的路去判定每一张图。见 resolveVisionProvider。
+ * `activeProvider` 传「本次定品实际成功的那条线路」：它刚证明过自己通不通，
+ * 质检跟着走，才不会拿一条已知不通的路去判定每一张图。见 resolveVisionProvider。
  */
 function createImageJudge(
   config: ReturnType<typeof useRuntimeConfig>,
@@ -507,29 +488,39 @@ function parseLlmJson(rawContent: string): Record<string, unknown> | null {
 
 /**
  * 单次 chat/completions 调用（真正发请求的那一层，不含重试）。
- * `options.tools` 存在时不带 response_format —— 两者都带会让部分模型直接
- * 吐 JSON 而跳过工具调用，起不到侦察作用。
+ *
+ * - `nativeWebSearch`：声明 DeepSeek 服务端工具，检索由官方执行。
+ *   此时 temperature 等采样参数会被忽略，且**不能**带 response_format（会 400）。
+ * - `tools`：旧出口的标准 function calling（客户端代搜），存在时不带 response_format，
+ *   否则模型可能直接吐 JSON 而跳过工具调用。
  */
 async function sendCompletion(
   provider: LlmProvider,
   messages: ChatMessage[],
   maxTokens: number,
   timeoutMs: number,
-  options: { tools?: unknown[]; jsonMode?: boolean } = {},
+  options: { tools?: unknown[]; jsonMode?: boolean; nativeWebSearch?: boolean } = {},
 ): Promise<CompletionResult> {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), timeoutMs)
 
   const body: Record<string, unknown> = {
     model: provider.model,
-    temperature: options.tools?.length ? 0.2 : 0.4,
     max_tokens: maxTokens,
     messages,
   }
 
-  if (options.tools?.length) {
-    body.tools = options.tools
-    body.tool_choice = 'auto'
+  if (options.nativeWebSearch) {
+    // thinking disabled = 单步联网（搜完即答）；enabled 会变成多次开页的深度检索，慢且贵。
+    body.tools = [NATIVE_WEB_SEARCH_TOOL]
+    body.thinking = { type: 'disabled' }
+  } else {
+    body.temperature = options.tools?.length ? 0.2 : 0.4
+
+    if (options.tools?.length) {
+      body.tools = options.tools
+      body.tool_choice = 'auto'
+    }
   }
 
   if (options.jsonMode) {
@@ -558,16 +549,24 @@ async function sendCompletion(
 
     const data = (await response.json()) as {
       choices?: Array<{
-        message?: { content?: string; tool_calls?: ToolCall[] }
+        message?: { content?: string; tool_calls?: ToolCall[]; server_tool_calls?: unknown[] }
         finish_reason?: string
       }>
+      // 联网请求可能在已产出部分内容后失败：HTTP 仍是 200，body 里带 error。
+      error?: { message?: string }
     }
+
+    if (data.error) {
+      throw new Error(`${provider.label} 生成中断：${data.error.message || 'unknown error'}`)
+    }
+
     const choice = data.choices?.[0]
 
     return {
       content: choice?.message?.content ?? '',
       finishReason: choice?.finish_reason ?? '',
       toolCalls: Array.isArray(choice?.message?.tool_calls) ? choice!.message!.tool_calls! : [],
+      serverToolCalls: Array.isArray(choice?.message?.server_tool_calls) ? choice!.message!.server_tool_calls! : [],
     }
   } finally {
     clearTimeout(timeout)
@@ -586,7 +585,7 @@ async function requestCompletion(
   messages: ChatMessage[],
   maxTokens: number,
   timeoutMs: number,
-  options: { tools?: unknown[]; jsonMode?: boolean } = {},
+  options: { tools?: unknown[]; jsonMode?: boolean; nativeWebSearch?: boolean } = {},
 ): Promise<CompletionResult> {
   return withTransportRetry(provider.label, () =>
     sendCompletion(provider, messages, maxTokens, timeoutMs, options),
@@ -644,7 +643,158 @@ interface ReconOutcome {
 }
 
 /**
- * 第一轮：带 tools 的侦察。
+ * DeepSeek 服务端联网返回的 `server_tool_calls` 结构（Chat Completions 扩展字段）。
+ * 只取 `kind === 'search'` 的步骤；深度检索 / 读链接没有我们需要的来源列表。
+ */
+interface NativeSearchCall {
+  kind?: unknown
+  status?: unknown
+  action?: { queries?: unknown }
+  sources?: unknown
+  error?: { code?: unknown }
+}
+
+interface NativeServerStep {
+  calls?: unknown
+}
+
+interface NativeSearchSource {
+  url?: unknown
+  title?: unknown
+  snippet?: unknown
+}
+
+function collectNativeSearch(steps: unknown[]) {
+  const queries: string[] = []
+  const hits: WebSearchHit[] = []
+  const notes: string[] = []
+  const seen = new Set<string>()
+
+  for (const rawStep of steps) {
+    const calls = (rawStep as NativeServerStep | null)?.calls
+
+    if (!Array.isArray(calls)) {
+      continue
+    }
+
+    for (const rawCall of calls) {
+      const call = rawCall as NativeSearchCall | null
+
+      if (!call || call.kind !== 'search') {
+        continue
+      }
+
+      const rawQueries = call.action?.queries
+
+      if (Array.isArray(rawQueries)) {
+        for (const rawQuery of rawQueries) {
+          const query = typeof rawQuery === 'string' ? rawQuery.trim() : ''
+          if (query) {
+            queries.push(query)
+          }
+        }
+      }
+
+      if (call.status === 'failed') {
+        const code = typeof call.error?.code === 'string' ? call.error.code : 'unknown'
+        notes.push(`联网检索失败（${code}）`)
+        continue
+      }
+
+      if (!Array.isArray(call.sources)) {
+        continue
+      }
+
+      for (const rawSource of call.sources) {
+        const source = rawSource as NativeSearchSource | null
+        const url = typeof source?.url === 'string' ? source.url.trim() : ''
+
+        if (!/^https?:\/\//i.test(url) || seen.has(url)) {
+          continue
+        }
+
+        seen.add(url)
+        const title = typeof source?.title === 'string' ? source.title.trim() : ''
+
+        hits.push({
+          title: title || url,
+          url,
+          content: typeof source?.snippet === 'string' ? source.snippet.trim() : '',
+        })
+      }
+    }
+  }
+
+  return { queries, hits, notes }
+}
+
+/**
+ * 原生联网侦察：一次调用内由 DeepSeek 完成「决定搜什么 → 搜 → 作答」。
+ *
+ * 与旧路径的差异：
+ * - 服务端工具结果直接进了模型上下文，不需要 role:'tool' 回填；
+ * - 不能带 response_format，模型可能输出带引用的散文，所以把来源摘要带给定稿轮；
+ * - `sources` 用于找出官方域与配图，不要求模型回抄 URL。
+ */
+async function runNativeSearchRecon(
+  provider: LlmProvider,
+  messages: ChatMessage[],
+  timeoutMs: number,
+): Promise<ReconOutcome> {
+  const timings = { llmMs: 0, searchMs: 0 }
+  const startedAt = Date.now()
+  let first: CompletionResult
+
+  try {
+    first = await requestCompletion(provider, messages, LLM_MAX_TOKENS, timeoutMs, {
+      nativeWebSearch: true,
+    })
+  } catch (error) {
+    timings.llmMs = Date.now() - startedAt
+
+    return {
+      directPayload: null,
+      queries: [],
+      hits: [],
+      images: [],
+      timings,
+      notes: [error instanceof Error ? error.message : String(error)],
+    }
+  }
+
+  timings.llmMs = Date.now() - startedAt
+  const { queries, hits, notes } = collectNativeSearch(first.serverToolCalls)
+  const directPayload = parseLlmJson(first.content)
+
+  if (directPayload) {
+    return { directPayload, queries, hits, images: [], timings, notes }
+  }
+
+  // 检索结果不会自动随下一轮请求回传（官方只在服务端上下文里用它们）。
+  // 把模型写下的答案 + 来源摘要一起带给定稿轮，source_url 才有依据。
+  const prose = stripToolProtocol(first.content.trim())
+
+  if (prose && hits.length) {
+    const sources = JSON.stringify({
+      results: hits.slice(0, 8).map((hit) => ({
+        title: truncate(hit.title, 90),
+        url: hit.url,
+        snippet: truncate(hit.content, HIT_SNIPPET_LIMIT),
+      })),
+    })
+
+    messages.push({ role: 'assistant', content: prose.slice(0, 1200) })
+    messages.push({
+      role: 'user',
+      content: `本轮联网检索到的来源如下，source_url 只能从中挑选：\n${sources}\n现在直接输出最终结论，只输出要求的那一个 JSON 对象，不要解释文字。`,
+    })
+  }
+
+  return { directPayload: null, queries, hits, images: [], timings, notes }
+}
+
+/**
+ * 第一轮：带 tools 的客户端代搜侦察（旧出口专用，deepseek 官方走 runNativeSearchRecon）。
  * 模型要么直接给答案，要么发起若干 web_search —— 由它自己判断，
  * 信息不足时它会选择追问（不调工具、也不给 JSON），那样直接进定品阶段。
  */
@@ -1280,6 +1430,15 @@ async function finalizeWithJson(
   return parsed
 }
 
+/** DeepSeek Chat 式用户元信息：日期,星期,地点,平台,语言。必须紧挨在 user 消息之前。 */
+function latestReminderMessage(): ChatMessage {
+  const now = new Date()
+  const weekday = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'][now.getDay()]
+
+  // 地点留空：我们没有可靠的用户定位，编一个城市反而会让检索跑偏。
+  return { role: 'latest_reminder', content: `${todayLabel()},${weekday},,Web,中文` }
+}
+
 async function callProvider(
   provider: LlmProvider,
   history: ChatTurn[],
@@ -1291,21 +1450,35 @@ async function callProvider(
     ...history.slice(-MAX_HISTORY_TURNS).map((turn) => ({ role: turn.role, content: turn.content })),
   ]
 
+  // 官方的「当前日期/语言」元信息：系统提示里已经写了日期，但这是官方推荐的口径，
+  // 联网检索会据此判断「最新」指哪一年。
+  if (provider.nativeWebSearch) {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      if (messages[index]?.role === 'user') {
+        messages.splice(index, 0, latestReminderMessage())
+        break
+      }
+    }
+  }
+
   let queries: string[] = []
   let hits: WebSearchHit[] = []
   let images: SearchImage[] = []
   const timings: Record<string, number> = {}
+  const nativeSearch = Boolean(provider.nativeWebSearch)
 
-  // ── 阶段一：联网侦察（仅在配置了搜索源、且搜索链路还能通时启用）────
-  // 搜索链路已被熔断时整段跳过：那一轮「让模型决定搜什么」的调用没有任何意义，
-  // 只会白等几秒（见 webSearch.ts 的 SEARCH_BREAKER_COOLDOWN_MS）。
-  if (hasSearchProvider(config) && isSearchLinkDown()) {
+  // ── 阶段一：联网侦察 ──────────────────────────────────────────
+  // 原生出口由 DeepSeek 在服务端完成检索；旧出口才需要「模型决定搜什么 → 我们
+  // 代它搜 → 回填 tool 消息」。Tavily 链路熔断时整段跳过，省掉一轮白等的模型调用。
+  if (!nativeSearch && hasSearchProvider(config) && isSearchLinkDown()) {
     console.warn('[llmBuyer] 搜索链路熔断中，跳过联网侦察，本轮凭模型自身知识定品')
   }
 
-  if (hasSearchProvider(config) && !isSearchLinkDown()) {
+  if (nativeSearch || (hasSearchProvider(config) && !isSearchLinkDown())) {
     const reconStartedAt = Date.now()
-    const recon = await runSearchRecon(provider, messages, config, timeoutMs)
+    const recon = nativeSearch
+      ? await runNativeSearchRecon(provider, messages, timeoutMs)
+      : await runSearchRecon(provider, messages, config, timeoutMs)
     timings.reconMs = Date.now() - reconStartedAt
     timings.reconLlmMs = recon.timings.llmMs
     timings.reconSearchMs = recon.timings.searchMs
@@ -1392,30 +1565,34 @@ export async function decideProductWithLlm(
   const providers = resolveProviders(config)
 
   if (providers.length === 0) {
-    throw new Error('未配置 LLM_API_KEY，无法使用大模型定品。')
+    throw new Error('未配置 DEEPSEEK_API_KEY，无法使用大模型定品。')
   }
 
-  // 每个进程只打一次：用来回答「备用线路到底注册上了没有」。
-  // 这个项目里 env 是构建时烤进产物的，配置对不对只能从日志看，没有别的口子。
+  // 每个进程只打一次：用来回答「当前链路到底用的哪个出口、有没有原生联网」。
+  // env 是构建时烤进产物的，配置对不对只能从日志看，没有别的口子。
   if (!providerLineupLogged) {
     providerLineupLogged = true
     console.log(
       `[llmBuyer] 可用线路 ${providers.length} 条：`,
-      providers.map((provider) => `${provider.label}@${safeHostname(provider.baseUrl) || '?'}`).join(' → '),
+      providers
+        .map(
+          (provider) =>
+            `${provider.label}@${safeHostname(provider.baseUrl) || '?'}${provider.nativeWebSearch ? '（原生联网）' : '（Tavily 代搜）'}`,
+        )
+        .join(' → '),
     )
   }
 
   const errors: string[] = []
   const defaultTimeoutMs = Number(config.llmTimeoutMs) || DEFAULT_LLM_TIMEOUT_MS
 
-  for (const [index, provider] of providers.entries()) {
+  for (const provider of providers) {
     if (isProviderCoolingDown(provider.label)) {
       errors.push(`${provider.label} 处于熔断冷却期`)
       continue
     }
 
-    /** 每条线路可以有自己的上限：跨境中转站要留足，国内直连不必陪着一起等 40s。 */
-    const timeoutMs = provider.timeoutMs ?? defaultTimeoutMs
+    const timeoutMs = defaultTimeoutMs
 
     const startedAt = Date.now()
     /** 已经下发给调用方的定品结论；非空即表示「用户那边已经看到东西了」。 */
@@ -1807,5 +1984,9 @@ export function toLlmRecommendation(product: LlmLockedProduct) {
 
 /** 供日志/前端展示：当前联网检索用的是什么数据源。 */
 export function describeSearchSource(config: ReturnType<typeof useRuntimeConfig>) {
+  if (resolveProviders(config).some((provider) => provider.nativeWebSearch)) {
+    return 'deepseek_web_search'
+  }
+
   return hasSearchProvider(config) ? getSearchProviderLabel(config) : ''
 }

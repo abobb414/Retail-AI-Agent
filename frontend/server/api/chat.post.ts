@@ -44,7 +44,7 @@ interface WorkerChatResponse {
 /**
  * 两条链路，缺一不可。
  *
- *   llm      —— 首选：买手大模型亲自定品（e-flowcode 中转站）
+ *   llm      —— 首选：DeepSeek 官方直连，买手大模型 + deepseek_web_search 亲自定品
  *   catalog  —— 兜底：Cloudflare Worker + D1 + Vectorize 商品库 RAG
  *
  * 🔴 关于 `catalog` 的存废（2026-09-29 的教训）：
@@ -52,12 +52,11 @@ interface WorkerChatResponse {
  * （原来还挂着 `LLM_FALLBACK_*` 备用大模型）。我把它过度理解成
  * 「整条兜底链路也一并摘掉」，顺手删了 Worker 商品库兜底 —— 那是错的。
  * 这两件事的性质完全不同：
- *   · 备用大模型 = 同一个出口换个型号。中转站抖动是链路级的，换模型救不回来，
- *     删掉它确实只省延迟不损可用性（所以它保持移除）。
+ *   · 备用大模型 = 同一个出口换个型号，删掉只省延迟，不损可用性。
  *   · Worker 兜底 = 换一整套数据源（D1 真实库存 + 向量召回），不依赖任何大模型。
  *     它是「大模型整条链路崩了」时唯一还能出卡片的路径，属于可用性保险，不能删。
- * 现在恢复为两级：大模型失败（报错 / 超时 / JSON 不合法）→ 立刻降级商品库兜底。
- * 正常情况下首选一次就成功，兜底连碰都不会碰，所以不额外增加延迟。
+ * 2026-11 起中转站已整体移除（官方直连自带联网），上面的取舍不变：
+ * 大模型失败（报错 / 超时 / JSON 不合法）→ 立刻降级商品库兜底。
  */
 type Engine = 'llm' | 'catalog'
 
@@ -604,7 +603,7 @@ export default defineEventHandler(async (event) => {
     writeEvent(event, 'error', {
       message: hasLlmProvider(config)
         ? `定品失败：大模型（${primary.reason ?? '原因未知'}）、商品库兜底（${fallback.reason ?? '原因未知'}）都没取到，稍后再试一次。`
-        : '尚未配置买手大模型（LLM_API_KEY / LLM_BASE_URL / LLM_MODEL），无法定品。',
+        : '尚未配置买手大模型（DEEPSEEK_API_KEY / DEEPSEEK_BASE_URL / DEEPSEEK_MODEL），无法定品。',
     })
   } catch (error) {
     // 同上：头已发出就改不动状态码了，错误靠 `error` 事件 + 日志送出。
