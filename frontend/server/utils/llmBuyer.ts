@@ -759,8 +759,8 @@ function dedupeHits(hits: WebSearchHit[]) {
  * - 它已明确输出 `action=recommend` 的 JSON，但没有任何来源支撑。
  *
  * 散文形态的回答**一律不补**：追问也常是没有问号的陈述句（「想帮你挑得更准，先告诉我预算」），
- * 补一条「去核实型号」的指令会把它推向定品 —— 那正是 2026-11-19 系统测试里
- * 「信息不足却出卡」的来源。零来源本身由 `search_note` 兜住，宁可记一笔，不要改变意图。
+ * 补一条「去核实型号」的指令会把它推向定品 —— 等于用一个新 bug 换一个静默失效。
+ * 零来源本身由 `search_note` 兜住：宁可记一笔，不要改变意图。
  */
 export function shouldRetryNativeSearch(queries: string[], hits: WebSearchHit[], content: string) {
   if (hits.length > 0) {
