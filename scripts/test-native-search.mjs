@@ -180,6 +180,15 @@ check(
   '品牌官方商品页优先于电商页',
   preferPurchasePage(hits[0].url, 'Sony', [hits[2], hits[1]], 'WH-1000XM5') === hits[1].url,
 )
+const zhihuUrl = 'https://zhuanlan.zhihu.com/p/510846714'
+check(
+  '第三方文章 + 有官方商品页 ⇒ 换成官方页',
+  preferPurchasePage(zhihuUrl, 'Sony', hits, 'WH-1000XM5') === hits[1].url,
+)
+check(
+  '第三方文章 + 只有电商页 ⇒ 不换（按钮要的是官网）',
+  preferPurchasePage(zhihuUrl, 'Sony', [hits[2]], 'WH-1000XM5') === zhihuUrl,
+)
 check(
   '官网页面不带商品路径时，型号词元也算命中',
   preferPurchasePage('https://helpguide.sony.net/x', 'Sony', [

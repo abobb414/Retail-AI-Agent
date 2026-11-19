@@ -308,7 +308,7 @@ node scripts/system-test.mjs http://127.0.0.1:3101 --fallback   # assert the fal
 | `test-brand-logo.mjs` | **11 cases** | Guards against third-party favicons posing as brand official logos (includes 16 third-party domain classes that must be blocked) |
 | `test-image-model-tokens.mjs` | 5 noisy URLs × 31 noise words + 6 real model numbers + 2 conflict verdicts + 4 brand tokens | Guards against "model-conflict misjudgment" throwing away good images |
 | `test-net-guard.mjs` | **61 cases** (15 groups) | Guards against the SSRF guard both missing internal addresses and blocking legitimate ones |
-| `test-native-search.mjs` | **29 cases** | Native search: `server_tool_calls` parsing & dedup, retry decision, manual-page → product-page swap |
+| `test-native-search.mjs` | **31 cases** | Native search: `server_tool_calls` parsing & dedup, retry decision, manual/third-party → official product page |
 | `test-llm-lines.mjs` | **13 cases** | Provider assembly, native-search enablement, vision QC following the breaker state |
 
 ```bash
@@ -462,7 +462,8 @@ npx wrangler secret put INGEST_TOKEN --config worker/wrangler.jsonc
 - **`source_url` prefers product pages**: native search returns web rankings, so the model often picks
   manual / support pages (observed: `helpguide.sony.net`). If `source_url` is clearly not a product page
   and the results contain an official product page (or an official page whose path carries the model
-  token), it is swapped in. With no candidate the original URL is kept — never fabricated.
+  token), it is swapped in. Third-party articles (Zhihu, SMZDM) are also swapped to a brand-official
+  page. With no candidate the original URL is kept — never fabricated.
 - Visual QC can use `deepseek-flash` directly (`input_modalities` includes image).
 
 > `usage.prompt_tokens_details.image_tokens` is not a reliable way to judge whether an image got through.

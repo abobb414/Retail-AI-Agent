@@ -868,17 +868,29 @@ export function preferPurchasePage(
   hits: WebSearchHit[],
   productName?: string,
 ): string | undefined {
-  if (!sourceUrl || !brand || !isNonPurchasePage(sourceUrl)) {
+  if (!sourceUrl || !brand) {
     return sourceUrl
   }
 
-  const best = pickPurchasePage(brand, hits, productName)
+  // 两种该换的情况：
+  // 1) 手册 / 支持 / 新闻页 —— 官方也好、第三方也好，都买不了东西；
+  // 2) 第三方文章（知乎、值得买…）—— 前端按钮写的是「查看官网」，
+  //    有品牌官方页就该换过去，哪怕它不完全是商品详情页。
+  // 第三方、且本身就是商品详情页（京东/天猫）时不动：那是能下单的地址。
+  const nonPurchase = isNonPurchasePage(sourceUrl)
+  const official = isBrandOfficialHost(safeHostname(sourceUrl), brandTokens(brand))
+
+  if (!nonPurchase && official) {
+    return sourceUrl
+  }
+
+  const best = pickPurchasePage(brand, hits, productName, { officialOnly: !nonPurchase })
 
   if (!best) {
     return sourceUrl
   }
 
-  console.log(`[llmBuyer] source_url 从非商品页换成商品页：${best.url}`)
+  console.log(`[llmBuyer] source_url 换成官方商品页：${best.url}`)
   return best.url
 }
 
