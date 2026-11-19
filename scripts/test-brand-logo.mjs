@@ -111,6 +111,13 @@ const CASES = [
     mustInclude: ['nbzr.com'],
   },
   {
+    name: '通用词不成品牌词元（NB（North Bayou）不许推出 north.com）',
+    options: { brand: 'NB（North Bayou）' },
+    mustInclude: ['nbzr.com'],
+    mustExclude: ['north.com', 'bayou.com'],
+    mustBeFirst: 'nbzr.com',
+  },
+  {
     name: 'explicit officialDomain 排在候选最前（尼康）',
     options: { officialDomain: 'www.nikon.com.cn', brand: 'Nikon 尼康' },
     mustInclude: ['www.nikon.com.cn', 'nikon.com.cn'],
@@ -144,6 +151,7 @@ for (const testCase of CASES) {
   )
 
   const missing = (testCase.mustInclude ?? []).filter((host) => !domains.includes(host))
+  const unexpected = (testCase.mustExclude ?? []).filter((host) => domains.includes(host))
   const wrongFirst =
     testCase.mustBeFirst && domains[0] !== testCase.mustBeFirst ? domains[0] ?? '(空)' : ''
   const notEmpty = testCase.mustBeEmpty && domains.length > 0 ? domains : null
@@ -152,6 +160,7 @@ for (const testCase of CASES) {
   const problems = [
     offenders.length ? `混进第三方域 ${JSON.stringify(offenders)}` : '',
     missing.length ? `缺 ${JSON.stringify(missing)}` : '',
+    unexpected.length ? `不该出现 ${JSON.stringify(unexpected)}` : '',
     wrongFirst ? `首位应为 ${testCase.mustBeFirst}，实际 ${wrongFirst}` : '',
     notEmpty ? `期望为空，实际 ${JSON.stringify(notEmpty)}` : '',
   ].filter(Boolean)

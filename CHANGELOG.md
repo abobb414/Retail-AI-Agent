@@ -2,6 +2,18 @@
 
 本文档记录 `Retail-AI-Agent` 的重要迭代。
 
+## [2026-11-19] — 修品牌标误配：通用词与多词别名的单词不再单独推域
+
+背景：别名补完之后线上复测「预算 300 的双屏显示器支架」，卡片品牌是 `NB（North Bayou）`，图却是 `https://north.com/favicon.ico` —— 一家服装品牌的标。根因是 `brandTokens` 把品牌串里每个拉丁词都当词元，`north` 单独成词元后推出的 `north.com` 正好有 favicon。错标比没图更糟。
+
+改动：
+
+- **通用词停用表 `GENERIC_BRAND_WORDS`**：`north / south / new / pro / max / air / tech / official ...` 这类「属于品牌名附近、但不是品牌本身」的词不再进词元。
+- **命中的多词别名整体当作品牌名**：`NB（North Bayou）` 命中 `north bayou → nbzr` 后，其中的 `bayou` 也不再单独抽词元（否则下一个错标就是 `bayou.com`）。别名词元同时排到候选最前，官方域探测优先落到 `nbzr.com`。
+- **测试**：`test-brand-logo.mjs` 增至 12 例，新增 `NB（North Bayou）` 必须推出 `nbzr.com`、且不得出现 `north.com` / `bayou.com`。
+
+验证：`test-brand-logo` 12/12、`test-native-search` 31/31、`test-llm-lines` 13/13、`test-catalog-intent` 21+21、`test-image-model-tokens` 全绿。
+
 ## [2026-11-19] — 原生联网收尾：零来源补搜、手册页换商品页、失效测试重写
 
 背景：前一天的线上验证只覆盖了「一切顺利」的那条路，而联网本身还有两个静默失效的口子。
@@ -14,7 +26,7 @@
 - **修掉一个单线路重构遗留的未定义变量**：provider 循环里还有 `providers[index + 1]`，`index` 已不存在 —— 线路一旦失败会先抛 `ReferenceError`，把真实原因吞成一句无关报错，并让「切换备用线路」的日志永远打不出来。改为 `providers.entries()`。
 - **测试**：新增 `test-native-search.mjs`（31 例：`server_tool_calls` 解析 / URL 去重 / 失败步骤 / 畸形输入 / 补搜判定 / 换页与补链接规则）；`test-llm-lines.mjs` 原本整套断言都是「主 + 备用」，早已随备用线路一起失效（跑起来直接 TypeError），重写为单线路 13 例（线路组装、原生联网只在官方端点启用、熔断期质检跟随）。`system-test` 的 S4 增加三条 meta 契约断言：`search_source`、`searched=true` 必带检索词、`searched=false` 必带 `search_note`；S2/S3 的输入从「想要个耳机」换成不带品类的「想买点东西，帮我看看」—— 前者只是没给预算，模型有时会直接定品（本轮线上跑批出现一次），拿它钉「信息不足必追问」本身就是一条会随机变红的断言。
 
-验证：离线 5 个脚本全绿（native-search 31 / llm-lines 13 / brand-logo 11 / net-guard 61 / model-tokens）；线上系统测试 **33 通过 / 0 失败**。补链接这一级被设计成保守策略：本轮「1500 元降噪耳机」跑批里检索结果只有媒体页、没有索尼官方商品页，最终 `source_url` 留空、图片退回品牌标 —— 这是预期行为（宁可没有按钮，不给错链接），日志里会打出「补官方页」或各级 `gateNotes` 供排查。
+验证：离线 5 个脚本全绿（native-search 31 / llm-lines 13 / brand-logo 12 / net-guard 61 / model-tokens）；线上系统测试 **33 通过 / 0 失败**。补链接这一级被设计成保守策略：本轮「1500 元降噪耳机」跑批里检索结果只有媒体页、没有索尼官方商品页，最终 `source_url` 留空、图片退回品牌标 —— 这是预期行为（宁可没有按钮，不给错链接），日志里会打出「补官方页」或各级 `gateNotes` 供排查。
 
 ## [2026-11-18] — 去掉 e-flowcode 中转站，DeepSeek 官方直连 + 原生联网
 

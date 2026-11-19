@@ -305,7 +305,7 @@ node scripts/system-test.mjs http://127.0.0.1:3101 --fallback   # 对故障注�
 |---|---|---|
 | `test-natural-dialogues.mjs` | **30 例** | 自然对话回归：追问 / 定品 / 多轮的行为基线 |
 | `test-catalog-intent.mjs` | **42 例**（21 profile + 21 clarify） | 品类、人群、预算的意图识别与追问话术 |
-| `test-brand-logo.mjs` | **11 例** | 防第三方站 favicon 冒充品牌官方标（含 16 类第三方域必须被拦） |
+| `test-brand-logo.mjs` | **12 例** | 防第三方站 favicon 冒充品牌官方标（含 16 类第三方域必须被拦） |
 | `test-image-model-tokens.mjs` | 5 例噪声 URL × 31 个噪声词 + 真型号 6 例 + 冲突判定 2 例 + 品牌词元 4 例 | 防「型号冲突误判」把好图全丢掉 |
 | `test-net-guard.mjs` | **61 例**（15 组分类） | 防 SSRF 守卫漏拦内网地址、又误伤正常域名 |
 | `test-native-search.mjs` | **31 例** | 原生联网：`server_tool_calls` 解析与去重、补搜判定、手册/第三方页换官方商品页 |
@@ -350,7 +350,7 @@ node scripts/probe-vision.mjs <baseUrl> <apiKey> <model> [imagePath]
 │   ├── system-test.mjs              # 系统测试：7 场景 33 断言
 │   ├── test-natural-dialogues.mjs   # 离线回归：自然对话 30 例
 │   ├── test-catalog-intent.mjs      # 离线回归：品类意图 42 例
-│   ├── test-brand-logo.mjs          # 离线回归：品牌标域名候选 11 例
+│   ├── test-brand-logo.mjs          # 离线回归：品牌标域名候选 12 例
 │   ├── test-net-guard.mjs            # 离线回归：SSRF 主机守卫 61 例
 │   ├── test-image-model-tokens.mjs  # 离线回归：型号词元抽取
 │   ├── test-native-search.mjs       # 离线回归：原生联网解析与 source_url 换页

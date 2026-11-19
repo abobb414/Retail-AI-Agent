@@ -51,6 +51,7 @@ const BRAND_ALIASES: Record<string, string[]> = {
   // 「NB」是显示器支架品牌 North Bayou 的常用简称，官方域 nbzr.com。
   // 两字母够不上词元长度门槛，只能靠别名。
   nb: ['nbzr'],
+  'north bayou': ['nbzr'],
   三星: ['samsung'],
   戴森: ['dyson'],
   飞利浦: ['philips'],
@@ -137,22 +138,87 @@ export function safeHostname(raw: string | undefined) {
  * 官方域定向检索与品牌域名判定从根上就是错的，而且完全不报错。
  * 现在先抓连续的字母数字串，再要求它**至少含一个字母**（挡掉纯数字）。
  */
+/**
+ * 品牌串里常见、但**不属于品牌本身**的词。
+ *
+ * 2026-11-19 实测：模型给 `NB（North Bayou）`，抽词元时 `north` 单独成型，
+ * 于是品牌标探测把 `north.com`（一家服装品牌）的 favicon 当成官方标贴了上来。
+ * 错标比没图更糟 —— 所以这类通用词一律不进词元。
+ */
+const GENERIC_BRAND_WORDS = new Set([
+  'north',
+  'south',
+  'east',
+  'west',
+  'new',
+  'old',
+  'the',
+  'and',
+  'inc',
+  'ltd',
+  'llc',
+  'corp',
+  'company',
+  'group',
+  'global',
+  'china',
+  'chinese',
+  'official',
+  'store',
+  'shop',
+  'series',
+  'pro',
+  'plus',
+  'max',
+  'mini',
+  'air',
+  'lite',
+  'ultra',
+  'smart',
+  'home',
+  'tech',
+  'technology',
+  'digital',
+  'electronic',
+  'electronics',
+  'life',
+  'living',
+  'lab',
+  'labs',
+  'studio',
+])
+
 export function brandTokens(brand: string | undefined): string[] {
   const tokens = new Set<string>()
   const raw = (brand ?? '').toLowerCase()
 
-  for (const word of raw.match(/[a-z0-9&]{3,}/g) ?? []) {
-    if (/[a-z]/.test(word)) {
-      tokens.add(word)
-    }
-  }
-
+  // 别名先入：官方域的推导口径以别名为准（`米家 → xiaomi, mi`）。
   for (const [aliasKey, hosts] of Object.entries(BRAND_ALIASES)) {
-    if (raw.includes(aliasKey.toLowerCase())) {
+    if (raw.includes(aliasKey)) {
       for (const host of hosts) {
         tokens.add(host)
       }
     }
+  }
+
+  // 命中的**多词**别名整体就是品牌名，里面单个词不能再单独推域：
+  // `NB（North Bayou）` 命中 `north bayou` 后，`bayou` 还是会被抽成词元，
+  // 推出 bayou.com（别人的站），与 north.com 是同一类错。
+  const aliasWords = new Set<string>()
+  for (const aliasKey of Object.keys(BRAND_ALIASES)) {
+    if (!aliasKey.includes(' ') || !raw.includes(aliasKey)) {
+      continue
+    }
+    for (const word of aliasKey.split(' ')) {
+      aliasWords.add(word)
+    }
+  }
+
+  for (const word of raw.match(/[a-z0-9&]{3,}/g) ?? []) {
+    if (!/[a-z]/.test(word) || GENERIC_BRAND_WORDS.has(word) || aliasWords.has(word)) {
+      continue
+    }
+    tokens.add(word)
   }
 
   return [...tokens]
