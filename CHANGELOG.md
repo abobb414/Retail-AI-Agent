@@ -12,7 +12,7 @@
 - **命中的多词别名整体当作品牌名**：`NB（North Bayou）` 命中 `north bayou → nbzr` 后，其中的 `bayou` 也不再单独抽词元（否则下一个错标就是 `bayou.com`）。别名词元同时排到候选最前，官方域探测优先落到 `nbzr.com`。
 - **测试**：`test-brand-logo.mjs` 增至 12 例，新增 `NB（North Bayou）` 必须推出 `nbzr.com`、且不得出现 `north.com` / `bayou.com`。
 
-验证：`test-brand-logo` 12/12、`test-native-search` 31/31、`test-llm-lines` 13/13、`test-catalog-intent` 21+21、`test-image-model-tokens` 全绿。
+验证：`test-brand-logo` 12/12、`test-native-search` 31/31、`test-llm-lines` 13/13、`test-catalog-intent` 21+21、`test-image-model-tokens` 全绿。线上重新部署后复测：`NB F160` 品牌为 `NB（NORTH BAYOU）` 时不再出现 `north.com` 错标（该轮无商品图，退回无图属正常兜底）；`索尼 WH-1000XM5` 正常出官方标；系统测试 **33 通过 / 0 失败**。
 
 ## [2026-11-19] — 原生联网收尾：零来源补搜、手册页换商品页、失效测试重写
 
