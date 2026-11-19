@@ -308,7 +308,7 @@ node scripts/system-test.mjs http://127.0.0.1:3101 --fallback   # 对故障注�
 | `test-brand-logo.mjs` | **9 例** | 防第三方站 favicon 冒充品牌官方标（含 16 类第三方域必须被拦） |
 | `test-image-model-tokens.mjs` | 5 例噪声 URL × 31 个噪声词 + 真型号 6 例 + 冲突判定 2 例 + 品牌词元 4 例 | 防「型号冲突误判」把好图全丢掉 |
 | `test-net-guard.mjs` | **61 例**（15 组分类） | 防 SSRF 守卫漏拦内网地址、又误伤正常域名 |
-| `test-native-search.mjs` | **25 例** | 原生联网：`server_tool_calls` 解析与去重、补搜判定、手册页换商品页 |
+| `test-native-search.mjs` | **29 例** | 原生联网：`server_tool_calls` 解析与去重、补搜判定、手册页换商品页 |
 | `test-llm-lines.mjs` | **13 例** | 线路组装、原生联网启用条件、熔断期质检跟随 |
 
 ```bash
@@ -452,7 +452,8 @@ npx wrangler secret put INGEST_TOKEN --config worker/wrangler.jsonc
   允许降级，不允许静默。
 - **`source_url` 优先商品页**：原生联网返回的是网页排序，模型常挑到手册 / 支持页
   （实测 `helpguide.sony.net`）。当 `source_url` 明显不是商品页、而检索结果里有官方商品页
-  （或路径带型号词元的官方页）时换成后者；没有候选就保留原地址，绝不凭空拼接。
+  （或路径带型号词元的官方页）时换成后者；**模型根本没给链接时**，也会从检索结果里补一个官方商品页
+  （只认品牌官方域 —— 补一个第三方站或别的型号，比没有按钮更糟）。没有候选就保留原样，绝不凭空拼接。
 - 视觉质检直接用 `deepseek-flash` 即可（模型列表 `input_modalities` 含 image）。
 
 ---

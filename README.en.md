@@ -308,7 +308,7 @@ node scripts/system-test.mjs http://127.0.0.1:3101 --fallback   # assert the fal
 | `test-brand-logo.mjs` | **9 cases** | Guards against third-party favicons posing as brand official logos (includes 16 third-party domain classes that must be blocked) |
 | `test-image-model-tokens.mjs` | 5 noisy URLs × 31 noise words + 6 real model numbers + 2 conflict verdicts + 4 brand tokens | Guards against "model-conflict misjudgment" throwing away good images |
 | `test-net-guard.mjs` | **61 cases** (15 groups) | Guards against the SSRF guard both missing internal addresses and blocking legitimate ones |
-| `test-native-search.mjs` | **25 cases** | Native search: `server_tool_calls` parsing & dedup, retry decision, manual-page → product-page swap |
+| `test-native-search.mjs` | **29 cases** | Native search: `server_tool_calls` parsing & dedup, retry decision, manual-page → product-page swap |
 | `test-llm-lines.mjs` | **13 cases** | Provider assembly, native-search enablement, vision QC following the breaker state |
 
 ```bash

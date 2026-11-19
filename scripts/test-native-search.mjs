@@ -29,7 +29,7 @@ export async function resolve(specifier, context, next) {
 `),
 )
 
-const { collectNativeSearch, shouldRetryNativeSearch, preferPurchasePage } = await import(
+const { collectNativeSearch, shouldRetryNativeSearch, preferPurchasePage, fillSourceUrlFromHits } = await import(
   '../frontend/server/utils/llmBuyer.ts'
 )
 
@@ -185,6 +185,36 @@ check(
   preferPurchasePage('https://helpguide.sony.net/x', 'Sony', [
     { title: 'XM5', url: 'https://www.sony.com.cn/electronics/headband-headphones/wh-1000xm5', content: '' },
   ], 'WH-1000XM5') === 'https://www.sony.com.cn/electronics/headband-headphones/wh-1000xm5',
+)
+
+// ── fillSourceUrlFromHits ───────────────────────────────────────
+
+const sennheiserHits = [
+  { title: 'MOMENTUM 4', url: 'https://www.sennheiser.com.cn/zh-cn/headphones/momentum-4', content: '' },
+  { title: '京东', url: 'https://item.jd.com/100012345678.html', content: '' },
+]
+
+check(
+  '模型没给链接 ⇒ 从检索结果补官方商品页',
+  fillSourceUrlFromHits({ brand: 'Sennheiser', name: 'MOMENTUM 4' }, sennheiserHits) ===
+    sennheiserHits[0].url,
+)
+check(
+  '只有电商页可选 ⇒ 不补（宁缺勿错）',
+  fillSourceUrlFromHits({ brand: 'Sennheiser', name: 'MOMENTUM 4' }, [sennheiserHits[1]]) === undefined,
+)
+check(
+  '已有链接 ⇒ 原样保留',
+  fillSourceUrlFromHits(
+    { brand: 'Sennheiser', name: 'MOMENTUM 4', source_url: 'https://example.com/p/1' },
+    sennheiserHits,
+  ) === 'https://example.com/p/1',
+)
+check(
+  '官方域但只有支持页 ⇒ 不补',
+  fillSourceUrlFromHits({ brand: 'Sennheiser', name: 'MOMENTUM 4' }, [
+    { title: '支持', url: 'https://www.sennheiser.com.cn/support/momentum-4', content: '' },
+  ]) === undefined,
 )
 
 // ── 汇总 ─────────────────────────────────────────────────────────

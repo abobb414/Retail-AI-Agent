@@ -809,14 +809,24 @@ function isNonPurchasePage(url: string) {
  * 这里只在**当前地址明显不是商品页**、且检索结果里确有商品页时才替换，
  * 其余情况一律不动（宁可不换，也不换错）。
  */
-export function preferPurchasePage(
-  sourceUrl: string | undefined,
+/**
+ * 从检索结果里挑一个「最像这一款商品页」的地址。
+ *
+ * 分档越低越可信：
+ *   3 = 品牌官方域 + 路径带型号词元（最稳）
+ *   2 = 品牌官方域 + 商品路径
+ *   1 = 非官方域的商品详情页（电商）
+ * 官网页面的路径千奇百怪（`/electronics/xxx/wh-1000xm5`），所以「带型号词元」单独算一档 ——
+ * URL 里的型号常带连字符（wh-1000xm5），抽出来的词元却是 WH1000XM5，比较前先去符号。
+ */
+function pickPurchasePage(
   brand: string | undefined,
   hits: WebSearchHit[],
   productName?: string,
-): string | undefined {
-  if (!sourceUrl || !brand || !isNonPurchasePage(sourceUrl)) {
-    return sourceUrl
+  options: { officialOnly?: boolean } = {},
+): { url: string; score: number } | null {
+  if (!brand) {
+    return null
   }
 
   const tokens = brandTokens(brand)
@@ -829,15 +839,16 @@ export function preferPurchasePage(
     }
 
     const official = isBrandOfficialHost(safeHostname(hit.url), tokens)
-    // 官网的商品页路径千奇百怪（/electronics/xxx/wh-1000xm5），
-    // 但路径里带着型号词元的页面基本就是那一款。
-    // URL 里的型号常带连字符（wh-1000xm5），抽出来的词元却是 WH1000XM5，比较前先去符号。
     const compactKey = pageKey(hit.url).replace(/[^a-z0-9]+/g, '')
     const modelMatched = modelTokens.some((token) =>
       compactKey.includes(token.toLowerCase().replace(/[^a-z0-9]+/g, '')),
     )
 
     if (!isPurchasePage(hit.url) && !(official && modelMatched)) {
+      continue
+    }
+
+    if (options.officialOnly && !official) {
       continue
     }
 
@@ -848,11 +859,50 @@ export function preferPurchasePage(
     }
   }
 
+  return best
+}
+
+export function preferPurchasePage(
+  sourceUrl: string | undefined,
+  brand: string | undefined,
+  hits: WebSearchHit[],
+  productName?: string,
+): string | undefined {
+  if (!sourceUrl || !brand || !isNonPurchasePage(sourceUrl)) {
+    return sourceUrl
+  }
+
+  const best = pickPurchasePage(brand, hits, productName)
+
   if (!best) {
     return sourceUrl
   }
 
   console.log(`[llmBuyer] source_url 从非商品页换成商品页：${best.url}`)
+  return best.url
+}
+
+/**
+ * 模型压根没给 source_url 时，用检索结果补一个。
+ *
+ * 只认品牌官方域（tier ≥ 2）：补一个别的站、或别的型号的商品页，
+ * 用户点进去买错东西，比没有按钮更糟。
+ */
+export function fillSourceUrlFromHits(
+  product: LlmLockedProduct,
+  hits: WebSearchHit[],
+): string | undefined {
+  if (product.source_url) {
+    return product.source_url
+  }
+
+  const best = pickPurchasePage(product.brand, hits, product.name, { officialOnly: true })
+
+  if (!best) {
+    return undefined
+  }
+
+  console.log(`[llmBuyer] 模型没给 source_url，从检索结果补官方页：${best.url}`)
   return best.url
 }
 
@@ -1938,6 +1988,10 @@ export async function decideProductWithLlm(
               return verdict
             }
           : undefined
+
+        // 模型没给链接时，用检索结果里的官方商品页补一个（只认品牌官方域）。
+        // 放在核验之前：补出来的页面也能走同一套 og:image / 可达性检查。
+        product.source_url = fillSourceUrlFromHits(product, hits)
 
         // 模型给的 source_url 只是线索：真去抓页面，可达才留链接；
         // og:image 还要过「品牌官方域名 + 可达 + 尺寸长宽比」三道闸，再经视觉质检。
