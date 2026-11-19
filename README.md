@@ -308,7 +308,7 @@ node scripts/system-test.mjs http://127.0.0.1:3101 --fallback   # 对故障注�
 | `test-brand-logo.mjs` | **9 例** | 防第三方站 favicon 冒充品牌官方标（含 16 类第三方域必须被拦） |
 | `test-image-model-tokens.mjs` | 5 例噪声 URL × 31 个噪声词 + 真型号 6 例 + 冲突判定 2 例 + 品牌词元 4 例 | 防「型号冲突误判」把好图全丢掉 |
 | `test-net-guard.mjs` | **61 例**（15 组分类） | 防 SSRF 守卫漏拦内网地址、又误伤正常域名 |
-| `test-native-search.mjs` | **24 例** | 原生联网：`server_tool_calls` 解析与去重、零来源判定、手册页换商品页 |
+| `test-native-search.mjs` | **25 例** | 原生联网：`server_tool_calls` 解析与去重、补搜判定、手册页换商品页 |
 | `test-llm-lines.mjs` | **13 例** | 线路组装、原生联网启用条件、熔断期质检跟随 |
 
 ```bash
@@ -446,8 +446,10 @@ npx wrangler secret put INGEST_TOKEN --config worker/wrangler.jsonc
 - 🔴 声明联网工具时**不能**带 `response_format`（会 400），所以流程是
   「联网轮（模型可能直接给出 JSON）→ 没给出时再走一轮强制 JSON 定稿」。
 - **零来源会补搜一次**：服务端工具无法被 `tool_choice` 强制，模型偶尔跳过检索直接凭记忆作答。
-  一条来源都没拿到且不像追问时，补发一次检索指令；补完仍为空则照常出卡，但 `meta.search_note`
-  会写明「模型未发起联网检索 / 检索已发起但未获得任何来源」——允许降级，不允许静默。
+  只在「已发起检索却没拿到来源」或「已明确输出 `action=recommend` 的 JSON」时补发一次；
+  散文回答一律不补 —— 追问也常是没有问号的陈述句，补搜指令会把追问推向定品。
+  补完仍为空则照常出卡，但 `meta.search_note` 会写明「模型未发起联网检索 / 检索已发起但未获得任何来源」——
+  允许降级，不允许静默。
 - **`source_url` 优先商品页**：原生联网返回的是网页排序，模型常挑到手册 / 支持页
   （实测 `helpguide.sony.net`）。当 `source_url` 明显不是商品页、而检索结果里有官方商品页
   （或路径带型号词元的官方页）时换成后者；没有候选就保留原地址，绝不凭空拼接。

@@ -29,7 +29,7 @@ export async function resolve(specifier, context, next) {
 `),
 )
 
-const { collectNativeSearch, isClarificationReply, preferPurchasePage } = await import(
+const { collectNativeSearch, shouldRetryNativeSearch, preferPurchasePage } = await import(
   '../frontend/server/utils/llmBuyer.ts'
 )
 
@@ -124,13 +124,28 @@ function step(calls) {
   check('畸形输入不抛错', result.hits.length === 0 && result.queries.length === 0)
 }
 
-// ── isClarificationReply ─────────────────────────────────────────
+// ── shouldRetryNativeSearch ──────────────────────────────────────
 
-check('JSON 追问判为追问', isClarificationReply('{"action":"clarify","chat_reply":"你常穿多大码？"}'))
-check('JSON 定品不判为追问', isClarificationReply('{"action":"recommend","chat_reply":"拿 XM5。"}') === false)
-check('散文追问判为追问', isClarificationReply('预算大概多少？'))
-check('散文定品不判为追问', isClarificationReply('直接拿索尼 WH-1000XM5。') === false)
-check('空内容不算追问', isClarificationReply('') === false)
+const someHits = [{ title: 'x', url: 'https://x.com', content: '' }]
+
+check('已有来源 ⇒ 不补搜', shouldRetryNativeSearch(['q'], someHits, '') === false)
+check(
+  '搜过但零来源 ⇒ 补搜（真失败）',
+  shouldRetryNativeSearch(['q'], [], '随手一句话') === true,
+)
+check(
+  'JSON 定品但零来源 ⇒ 补搜',
+  shouldRetryNativeSearch([], [], '{"action":"recommend","chat_reply":"拿 XM5。"}') === true,
+)
+check(
+  'JSON 追问且零来源 ⇒ 不补搜',
+  shouldRetryNativeSearch([], [], '{"action":"clarify","chat_reply":"你常穿多大码？"}') === false,
+)
+check('散文追问且零来源 ⇒ 不补搜', shouldRetryNativeSearch([], [], '预算大概多少？') === false)
+check(
+  '散文陈述（可能是在追问没问号）⇒ 不补搜，交给 search_note 记录',
+  shouldRetryNativeSearch([], [], '想帮你挑得更准，先告诉我预算和佩戴场景。') === false,
+)
 
 // ── preferPurchasePage ───────────────────────────────────────────
 

@@ -308,7 +308,7 @@ node scripts/system-test.mjs http://127.0.0.1:3101 --fallback   # assert the fal
 | `test-brand-logo.mjs` | **9 cases** | Guards against third-party favicons posing as brand official logos (includes 16 third-party domain classes that must be blocked) |
 | `test-image-model-tokens.mjs` | 5 noisy URLs × 31 noise words + 6 real model numbers + 2 conflict verdicts + 4 brand tokens | Guards against "model-conflict misjudgment" throwing away good images |
 | `test-net-guard.mjs` | **61 cases** (15 groups) | Guards against the SSRF guard both missing internal addresses and blocking legitimate ones |
-| `test-native-search.mjs` | **24 cases** | Native search: `server_tool_calls` parsing & dedup, zero-source detection, manual-page → product-page swap |
+| `test-native-search.mjs` | **25 cases** | Native search: `server_tool_calls` parsing & dedup, retry decision, manual-page → product-page swap |
 | `test-llm-lines.mjs` | **13 cases** | Provider assembly, native-search enablement, vision QC following the breaker state |
 
 ```bash
@@ -453,10 +453,12 @@ npx wrangler secret put INGEST_TOKEN --config worker/wrangler.jsonc
 - 🔴 `response_format` cannot be combined with the web tool (HTTP 400), so the pipeline is
   "search round (the model may already emit JSON) → a separate forced-JSON round if it did not".
 - **Zero sources triggers one retry**: the server tool cannot be forced with `tool_choice`, and the model
-  occasionally answers from memory without searching. When no source comes back and the reply doesn't look
-  like a clarifying question, one extra search instruction is sent. Still empty ⇒ the card is still
-  delivered, but `meta.search_note` records why ("the model never searched" / "search ran but returned
-  nothing"). Degrading is allowed; doing so silently is not.
+  occasionally answers from memory without searching. The retry is sent only when the model already ran a
+  search but got nothing, or when it explicitly emitted `action=recommend` JSON with no sources. Prose
+  replies are never retried — clarifying answers are often statements without a question mark, and the
+  retry instruction would push them toward locking a product. Still empty ⇒ the card is still delivered,
+  but `meta.search_note` records why ("the model never searched" / "search ran but returned nothing").
+  Degrading is allowed; doing so silently is not.
 - **`source_url` prefers product pages**: native search returns web rankings, so the model often picks
   manual / support pages (observed: `helpguide.sony.net`). If `source_url` is clearly not a product page
   and the results contain an official product page (or an official page whose path carries the model

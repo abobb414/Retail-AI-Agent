@@ -121,7 +121,9 @@ async function main() {
 
   // ── S2+S3 追问流程（协议 + 行为） ─────────────────────────
   section('S2/S3 追问流程与 SSE 协议')
-  const clarify = await readSse([{ role: 'user', content: '想要个耳机' }])
+  // 品类都不给：模型没有可定品的对象，追问才是唯一合理行为。
+  // （「想要个耳机」这种「有品类、无预算」的输入，模型有时会直接定品，不能用来钉这条。）
+  const clarify = await readSse([{ role: 'user', content: '想买点东西，帮我看看' }])
   check('SSE 事件非空', clarify.events.length > 0)
   check('data 全部为合法 JSON', clarify.malformed.length === 0, `坏块: ${clarify.malformed.join(',')}`)
   check('以 done 收尾', lastEvent(clarify.events) === 'done', `实际 ${lastEvent(clarify.events)}`)

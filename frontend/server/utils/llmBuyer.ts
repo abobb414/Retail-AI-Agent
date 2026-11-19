@@ -734,7 +734,7 @@ export function collectNativeSearch(steps: unknown[]) {
 
 /** 零来源时补发的一次性指令（只补一次，见 runNativeSearchRecon）。 */
 const NATIVE_SEARCH_RETRY_PROMPT =
-  '上一轮没有真正发起联网检索。请先调用联网搜索核实该型号当前的在售价格与参数，再给出结论。'
+  '上一轮没有拿到任何联网来源。请重新发起联网检索核实型号与价格后再作答；如果信息不足，按追问处理。'
 
 function dedupeHits(hits: WebSearchHit[]) {
   const seen = new Set<string>()
@@ -751,21 +751,27 @@ function dedupeHits(hits: WebSearchHit[]) {
   return unique
 }
 
-/** 模型这一轮是不是在追问（追问不需要联网，零来源是正常的）。 */
-export function isClarificationReply(content: string) {
-  const text = content.trim()
-
-  if (!text) {
+/**
+ * 零来源时该不该补搜。
+ *
+ * 只在两种「确定模型想定品」的情况下补：
+ * - 它已经发起过检索，只是没拿到来源（queries 非空）—— 这是真失败，值得重来；
+ * - 它已明确输出 `action=recommend` 的 JSON，但没有任何来源支撑。
+ *
+ * 散文形态的回答**一律不补**：追问也常是没有问号的陈述句（「想帮你挑得更准，先告诉我预算」），
+ * 补一条「去核实型号」的指令会把它推向定品 —— 那正是 2026-11-19 系统测试里
+ * 「信息不足却出卡」的来源。零来源本身由 `search_note` 兜住，宁可记一笔，不要改变意图。
+ */
+export function shouldRetryNativeSearch(queries: string[], hits: WebSearchHit[], content: string) {
+  if (hits.length > 0) {
     return false
   }
 
-  const payload = parseLlmJson(text)
-
-  if (payload) {
-    return payload.action === 'clarify'
+  if (queries.length > 0) {
+    return true
   }
 
-  return /[?？]\s*$/.test(stripToolProtocol(text))
+  return parseLlmJson(content)?.action === 'recommend'
 }
 
 /** 手册 / 支持 / 新闻这类页面：能证明型号存在，但点进去买不了东西。 */
@@ -895,7 +901,7 @@ async function runNativeSearchRecon(
    * 所以「一条来源都没拿到」时必须再要一次，而不是默默出卡。
    * 追问轮本来就该零来源（它没在定品），按「像不像澄清问题」排除掉，避免白花一次调用。
    */
-  if (hits.length === 0 && !isClarificationReply(first.content)) {
+  if (shouldRetryNativeSearch(queries, hits, first.content)) {
     console.warn('[llmBuyer] 首轮联网没有拿到任何来源，补一次检索')
 
     messages.push({ role: 'user', content: NATIVE_SEARCH_RETRY_PROMPT })
