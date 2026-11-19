@@ -305,7 +305,7 @@ node scripts/system-test.mjs http://127.0.0.1:3101 --fallback   # assert the fal
 |---|---|---|
 | `test-natural-dialogues.mjs` | **30 cases** | Natural-dialogue regression: behavior baseline for clarify / locking / multi-turn |
 | `test-catalog-intent.mjs` | **42 cases** (21 profile + 21 clarify) | Intent recognition and clarifying-question phrasing across categories, audiences, budgets |
-| `test-brand-logo.mjs` | **9 cases** | Guards against third-party favicons posing as brand official logos (includes 16 third-party domain classes that must be blocked) |
+| `test-brand-logo.mjs` | **11 cases** | Guards against third-party favicons posing as brand official logos (includes 16 third-party domain classes that must be blocked) |
 | `test-image-model-tokens.mjs` | 5 noisy URLs × 31 noise words + 6 real model numbers + 2 conflict verdicts + 4 brand tokens | Guards against "model-conflict misjudgment" throwing away good images |
 | `test-net-guard.mjs` | **61 cases** (15 groups) | Guards against the SSRF guard both missing internal addresses and blocking legitimate ones |
 | `test-native-search.mjs` | **29 cases** | Native search: `server_tool_calls` parsing & dedup, retry decision, manual-page → product-page swap |
@@ -351,7 +351,7 @@ node scripts/probe-vision.mjs <baseUrl> <apiKey> <model> [imagePath]
 │   ├── system-test.mjs              # System test: 7 scenarios, 33 assertions
 │   ├── test-natural-dialogues.mjs   # Offline regression: 30 natural-dialogue cases
 │   ├── test-catalog-intent.mjs      # Offline regression: 42 category-intent cases
-│   ├── test-brand-logo.mjs          # Offline regression: 9 brand-logo domain candidate cases
+│   ├── test-brand-logo.mjs          # Offline regression: 11 brand-logo domain candidate cases
 │   ├── test-net-guard.mjs            # Offline regression: SSRF host guard, 61 cases
 │   ├── test-image-model-tokens.mjs  # Offline regression: model-token extraction
 │   ├── test-native-search.mjs       # Offline regression: native-search parsing & source_url swap

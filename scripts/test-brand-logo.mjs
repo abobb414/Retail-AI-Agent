@@ -101,6 +101,16 @@ const CASES = [
     mustInclude: ['kingrinder.com'],
   },
   {
+    name: '中文品牌靠别名推域（米家 → mi.com）',
+    options: { brand: '米家' },
+    mustInclude: ['mi.com'],
+  },
+  {
+    name: '两字母品牌 + 括号注释也能推域（NB → nbzr.com）',
+    options: { brand: 'NB（显示器支架品牌）' },
+    mustInclude: ['nbzr.com'],
+  },
+  {
     name: 'explicit officialDomain 排在候选最前（尼康）',
     options: { officialDomain: 'www.nikon.com.cn', brand: 'Nikon 尼康' },
     mustInclude: ['www.nikon.com.cn', 'nikon.com.cn'],
