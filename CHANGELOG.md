@@ -13,6 +13,8 @@
 - **修掉一个单线路重构遗留的未定义变量**：provider 循环里还有 `providers[index + 1]`，`index` 已不存在 —— 线路一旦失败会先抛 `ReferenceError`，把真实原因吞成一句无关报错，并让「切换备用线路」的日志永远打不出来。改为 `providers.entries()`。
 - **测试**：新增 `test-native-search.mjs`（29 例：`server_tool_calls` 解析 / URL 去重 / 失败步骤 / 畸形输入 / 补搜判定 / 换页与补链接规则）；`test-llm-lines.mjs` 原本整套断言都是「主 + 备用」，早已随备用线路一起失效（跑起来直接 TypeError），重写为单线路 13 例（线路组装、原生联网只在官方端点启用、熔断期质检跟随）。`system-test` 的 S4 增加三条 meta 契约断言：`search_source`、`searched=true` 必带检索词、`searched=false` 必带 `search_note`；S2/S3 的输入从「想要个耳机」换成不带品类的「想买点东西，帮我看看」—— 前者只是没给预算，模型有时会直接定品（本轮线上跑批出现一次），拿它钉「信息不足必追问」本身就是一条会随机变红的断言。
 
+验证：离线 5 个脚本全绿（native-search 29 / llm-lines 13 / brand-logo 9 / net-guard 61 / model-tokens）；线上系统测试 **33 通过 / 0 失败**。补链接这一级被设计成保守策略：本轮「1500 元降噪耳机」跑批里检索结果只有媒体页、没有索尼官方商品页，最终 `source_url` 留空、图片退回品牌标 —— 这是预期行为（宁可没有按钮，不给错链接），日志里会打出「补官方页」或各级 `gateNotes` 供排查。
+
 ## [2026-11-18] — 去掉 e-flowcode 中转站，DeepSeek 官方直连 + 原生联网
 
 用户原话：
