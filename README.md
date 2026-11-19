@@ -21,7 +21,7 @@
 [![License](https://img.shields.io/badge/license-MIT-3b82f6?style=flat-square)](./LICENSE)
 [![Nuxt](https://img.shields.io/badge/Nuxt-3-00DC82?style=flat-square)](#技术栈)
 [![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-F6821F?style=flat-square)](#架构)
-[![System Test](https://img.shields.io/badge/system%20test-30%2F30-22c55e?style=flat-square)](#测试)
+[![System Test](https://img.shields.io/badge/system%20test-33%2F33-22c55e?style=flat-square)](#测试)
 [![Catalog](https://img.shields.io/badge/catalog-2%2C746%20SKUs-0ea5e9?style=flat-square)](#架构)
 [![Image Pipeline](https://img.shields.io/badge/image%20pipeline-4%20levels-8b5cf6?style=flat-square)](#特性)
 
@@ -278,7 +278,7 @@ npm run build
 
 两套：**离线回归**（不联网、无需 dev server）与**系统测试**（对运行中的实例打全链路）。
 
-### 系统测试 · 7 场景 30 断言
+### 系统测试 · 7 场景 33 断言
 
 | 场景 | 覆盖内容 |
 |---|---|
@@ -308,11 +308,15 @@ node scripts/system-test.mjs http://127.0.0.1:3101 --fallback   # 对故障注�
 | `test-brand-logo.mjs` | **9 例** | 防第三方站 favicon 冒充品牌官方标（含 16 类第三方域必须被拦） |
 | `test-image-model-tokens.mjs` | 5 例噪声 URL × 31 个噪声词 + 真型号 6 例 + 冲突判定 2 例 + 品牌词元 4 例 | 防「型号冲突误判」把好图全丢掉 |
 | `test-net-guard.mjs` | **61 例**（15 组分类） | 防 SSRF 守卫漏拦内网地址、又误伤正常域名 |
+| `test-native-search.mjs` | **24 例** | 原生联网：`server_tool_calls` 解析与去重、零来源判定、手册页换商品页 |
+| `test-llm-lines.mjs` | **13 例** | 线路组装、原生联网启用条件、熔断期质检跟随 |
 
 ```bash
 node --experimental-strip-types scripts/test-brand-logo.mjs
 node --experimental-strip-types scripts/test-image-model-tokens.mjs
 node --experimental-strip-types scripts/test-catalog-intent.mjs
+node --experimental-strip-types scripts/test-native-search.mjs
+node --experimental-strip-types scripts/test-llm-lines.mjs
 ```
 
 > `test-brand-logo.mjs` 会注册一个 `data:` URL 的 resolve 钩子，给源码里**无扩展名**的相对导入补 `.ts` 后缀 ——
@@ -343,12 +347,14 @@ node scripts/probe-vision.mjs <baseUrl> <apiKey> <model> [imagePath]
 │       ├── 001_expand_products_for_rag.sql
 │       └── 002_catalog_facets.sql
 ├── scripts/                         # 测试、导入、探测（详见 scripts/README.md）
-│   ├── system-test.mjs              # 系统测试：7 场景 30 断言
+│   ├── system-test.mjs              # 系统测试：7 场景 33 断言
 │   ├── test-natural-dialogues.mjs   # 离线回归：自然对话 30 例
 │   ├── test-catalog-intent.mjs      # 离线回归：品类意图 42 例
 │   ├── test-brand-logo.mjs          # 离线回归：品牌标域名候选 9 例
 │   ├── test-net-guard.mjs            # 离线回归：SSRF 主机守卫 61 例
 │   ├── test-image-model-tokens.mjs  # 离线回归：型号词元抽取
+│   ├── test-native-search.mjs       # 离线回归：原生联网解析与 source_url 换页
+│   ├── test-llm-lines.mjs           # 离线回归：线路组装与质检跟随
 │   ├── test-cold-products.mjs       # 端到端：冷门长尾产品
 │   ├── probe-vision.mjs             # 视觉能力探测
 │   ├── import-real-products.mjs     # 批量导入商品到 D1 + Vectorize
@@ -439,6 +445,12 @@ npx wrangler secret put INGEST_TOKEN --config worker/wrangler.jsonc
   来源以 `server_tool_calls[].calls[].sources` 返回，不需要客户端代搜。
 - 🔴 声明联网工具时**不能**带 `response_format`（会 400），所以流程是
   「联网轮（模型可能直接给出 JSON）→ 没给出时再走一轮强制 JSON 定稿」。
+- **零来源会补搜一次**：服务端工具无法被 `tool_choice` 强制，模型偶尔跳过检索直接凭记忆作答。
+  一条来源都没拿到且不像追问时，补发一次检索指令；补完仍为空则照常出卡，但 `meta.search_note`
+  会写明「模型未发起联网检索 / 检索已发起但未获得任何来源」——允许降级，不允许静默。
+- **`source_url` 优先商品页**：原生联网返回的是网页排序，模型常挑到手册 / 支持页
+  （实测 `helpguide.sony.net`）。当 `source_url` 明显不是商品页、而检索结果里有官方商品页
+  （或路径带型号词元的官方页）时换成后者；没有候选就保留原地址，绝不凭空拼接。
 - 视觉质检直接用 `deepseek-flash` 即可（模型列表 `input_modalities` 含 image）。
 
 ---
@@ -462,6 +474,9 @@ npx wrangler secret put INGEST_TOKEN --config worker/wrangler.jsonc
 | `error` | 错误信息 |
 
 定品开始前会先发一条 `{ "pending": true, "stage": "thinking" }`，前端只显示统一的三点等待动画，不渲染任何等待文案。
+
+`meta` 里的 `searched` / `search_queries` / `search_note` 只用于内部诊断：`searched=false` 时
+`search_note` 会写明原因（「模型未发起联网检索」或「检索已发起但未获得任何来源」）。
 
 降级到商品库时 `meta` 形如：
 

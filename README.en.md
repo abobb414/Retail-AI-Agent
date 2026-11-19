@@ -21,7 +21,7 @@ The entire pipeline is designed around one principle: "if any single link dies, 
 [![License](https://img.shields.io/badge/license-MIT-3b82f6?style=flat-square)](./LICENSE)
 [![Nuxt](https://img.shields.io/badge/Nuxt-3-00DC82?style=flat-square)](#tech-stack)
 [![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-F6821F?style=flat-square)](#architecture)
-[![System Test](https://img.shields.io/badge/system%20test-30%2F30-22c55e?style=flat-square)](#testing)
+[![System Test](https://img.shields.io/badge/system%20test-33%2F33-22c55e?style=flat-square)](#testing)
 [![Catalog](https://img.shields.io/badge/catalog-2%2C746%20SKUs-0ea5e9?style=flat-square)](#architecture)
 [![Image Pipeline](https://img.shields.io/badge/image%20pipeline-4%20levels-8b5cf6?style=flat-square)](#features)
 
@@ -278,7 +278,7 @@ npm run build
 
 Two suites: **offline regression** (no network, no dev server needed) and **system tests** (full-pipeline runs against a live instance).
 
-### System test · 7 scenarios, 30 assertions
+### System test · 7 scenarios, 33 assertions
 
 | Scenario | Coverage |
 |---|---|
@@ -308,12 +308,16 @@ node scripts/system-test.mjs http://127.0.0.1:3101 --fallback   # assert the fal
 | `test-brand-logo.mjs` | **9 cases** | Guards against third-party favicons posing as brand official logos (includes 16 third-party domain classes that must be blocked) |
 | `test-image-model-tokens.mjs` | 5 noisy URLs × 31 noise words + 6 real model numbers + 2 conflict verdicts + 4 brand tokens | Guards against "model-conflict misjudgment" throwing away good images |
 | `test-net-guard.mjs` | **61 cases** (15 groups) | Guards against the SSRF guard both missing internal addresses and blocking legitimate ones |
+| `test-native-search.mjs` | **24 cases** | Native search: `server_tool_calls` parsing & dedup, zero-source detection, manual-page → product-page swap |
+| `test-llm-lines.mjs` | **13 cases** | Provider assembly, native-search enablement, vision QC following the breaker state |
 
 ```bash
 node --experimental-strip-types scripts/test-net-guard.mjs
 node --experimental-strip-types scripts/test-brand-logo.mjs
 node --experimental-strip-types scripts/test-image-model-tokens.mjs
 node --experimental-strip-types scripts/test-catalog-intent.mjs
+node --experimental-strip-types scripts/test-native-search.mjs
+node --experimental-strip-types scripts/test-llm-lines.mjs
 ```
 
 > `test-brand-logo.mjs` registers a resolve hook for `data:` URLs that appends `.ts` to **extension-less** relative imports in the source —
@@ -344,12 +348,14 @@ node scripts/probe-vision.mjs <baseUrl> <apiKey> <model> [imagePath]
 │       ├── 001_expand_products_for_rag.sql
 │       └── 002_catalog_facets.sql
 ├── scripts/                         # Tests, import, probes (see scripts/README.md)
-│   ├── system-test.mjs              # System test: 7 scenarios, 30 assertions
+│   ├── system-test.mjs              # System test: 7 scenarios, 33 assertions
 │   ├── test-natural-dialogues.mjs   # Offline regression: 30 natural-dialogue cases
 │   ├── test-catalog-intent.mjs      # Offline regression: 42 category-intent cases
 │   ├── test-brand-logo.mjs          # Offline regression: 9 brand-logo domain candidate cases
 │   ├── test-net-guard.mjs            # Offline regression: SSRF host guard, 61 cases
 │   ├── test-image-model-tokens.mjs  # Offline regression: model-token extraction
+│   ├── test-native-search.mjs       # Offline regression: native-search parsing & source_url swap
+│   ├── test-llm-lines.mjs           # Offline regression: provider assembly & vision provider
 │   ├── test-cold-products.mjs       # End-to-end: niche long-tail products
 │   ├── probe-vision.mjs             # Vision capability probe
 │   ├── import-real-products.mjs     # Bulk import of products into D1 + Vectorize
@@ -446,9 +452,18 @@ npx wrangler secret put INGEST_TOKEN --config worker/wrangler.jsonc
   the client does not execute any tool.
 - 🔴 `response_format` cannot be combined with the web tool (HTTP 400), so the pipeline is
   "search round (the model may already emit JSON) → a separate forced-JSON round if it did not".
+- **Zero sources triggers one retry**: the server tool cannot be forced with `tool_choice`, and the model
+  occasionally answers from memory without searching. When no source comes back and the reply doesn't look
+  like a clarifying question, one extra search instruction is sent. Still empty ⇒ the card is still
+  delivered, but `meta.search_note` records why ("the model never searched" / "search ran but returned
+  nothing"). Degrading is allowed; doing so silently is not.
+- **`source_url` prefers product pages**: native search returns web rankings, so the model often picks
+  manual / support pages (observed: `helpguide.sony.net`). If `source_url` is clearly not a product page
+  and the results contain an official product page (or an official page whose path carries the model
+  token), it is swapped in. With no candidate the original URL is kept — never fabricated.
 - Visual QC can use `deepseek-flash` directly (`input_modalities` includes image).
 
-> `usage.prompt_tokens_details.image_tokens` is always `0` on relay stations, so it **cannot** be used to judge whether an image got through.
+> `usage.prompt_tokens_details.image_tokens` is not a reliable way to judge whether an image got through.
 > The product side currently has no image input entry (text input only), and the server doesn't assemble `image_url` content blocks either — the model being able to see images ≠ the app being able to use images.
 
 ---

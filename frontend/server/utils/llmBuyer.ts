@@ -65,6 +65,8 @@ export interface LlmBuyerOutcome {
   searchQueries: string[]
   /** 是否真的拿到了网页结果。 */
   searched: boolean
+  /** 定品时没有拿到任何联网来源的原因（仅当 action=recommend 且 searched=false 时存在）。 */
+  searchNote?: string
   /** 来源页是否经过后端实地核验（可达）。 */
   sourceVerified: boolean
   /** 商品图是怎么来的：模型来源页 og:image / 官方候选页 og:image / 模型自带的官方图 / 无。 */
@@ -90,6 +92,8 @@ export interface LlmProductLockedEvent {
   latencyMs: number
   searchQueries: string[]
   searched: boolean
+  /** 定品没拿到联网来源时的原因；有来源时不带。 */
+  searchNote?: string
 }
 
 export interface LlmBuyerHooks {
@@ -664,7 +668,7 @@ interface NativeSearchSource {
   snippet?: unknown
 }
 
-function collectNativeSearch(steps: unknown[]) {
+export function collectNativeSearch(steps: unknown[]) {
   const queries: string[] = []
   const hits: WebSearchHit[] = []
   const notes: string[] = []
@@ -728,6 +732,124 @@ function collectNativeSearch(steps: unknown[]) {
   return { queries, hits, notes }
 }
 
+/** 零来源时补发的一次性指令（只补一次，见 runNativeSearchRecon）。 */
+const NATIVE_SEARCH_RETRY_PROMPT =
+  '上一轮没有真正发起联网检索。请先调用联网搜索核实该型号当前的在售价格与参数，再给出结论。'
+
+function dedupeHits(hits: WebSearchHit[]) {
+  const seen = new Set<string>()
+  const unique: WebSearchHit[] = []
+
+  for (const hit of hits) {
+    if (seen.has(hit.url)) {
+      continue
+    }
+    seen.add(hit.url)
+    unique.push(hit)
+  }
+
+  return unique
+}
+
+/** 模型这一轮是不是在追问（追问不需要联网，零来源是正常的）。 */
+export function isClarificationReply(content: string) {
+  const text = content.trim()
+
+  if (!text) {
+    return false
+  }
+
+  const payload = parseLlmJson(text)
+
+  if (payload) {
+    return payload.action === 'clarify'
+  }
+
+  return /[?？]\s*$/.test(stripToolProtocol(text))
+}
+
+/** 手册 / 支持 / 新闻这类页面：能证明型号存在，但点进去买不了东西。 */
+const NON_PURCHASE_PATH_RE =
+  /(?:^|[/._-])(help|helpguide|support|manual|manuals|guide|guides|faq|docs?|documentation|wiki|community|forum|news|press|blog|events?|download|downloads|reviews?|articles?)(?:[/._-]|$)/i
+
+/** 商品详情页的常见形态：品牌官网的 product / shop，以及主流电商的详情路径。 */
+const PURCHASE_PATH_RE =
+  /(?:^|[/._-])(product|products|item|items|dp|goods|shop|store|sku|detail|buy)(?:[/._-]|$)|jd\.com\/\d+\.html|item\.(?:taobao|tmall)\.com|detail\.(?:tmall|taobao)\.com|amazon\.[a-z.]+\/dp\//i
+
+function pageKey(url: string) {
+  try {
+    const parsed = new URL(url)
+    return `${parsed.hostname}${parsed.pathname}`.toLowerCase()
+  } catch {
+    return url.toLowerCase()
+  }
+}
+
+function isPurchasePage(url: string) {
+  return PURCHASE_PATH_RE.test(pageKey(url))
+}
+
+function isNonPurchasePage(url: string) {
+  return NON_PURCHASE_PATH_RE.test(pageKey(url))
+}
+
+/**
+ * 把「查看官网」从手册页换到能下单的商品页。
+ *
+ * 2026-11-19 实测：问降噪耳机时模型给的 source_url 是
+ * `helpguide.sony.net/.../TP1000538279.html` —— 官方、可达、但不是商品页，
+ * 用户点「查看官网」得到的是一页说明书。原生联网返回的是网页排序，
+ * 模型会优先挑「看起来权威」的，而不是「能买」的。
+ * 这里只在**当前地址明显不是商品页**、且检索结果里确有商品页时才替换，
+ * 其余情况一律不动（宁可不换，也不换错）。
+ */
+export function preferPurchasePage(
+  sourceUrl: string | undefined,
+  brand: string | undefined,
+  hits: WebSearchHit[],
+  productName?: string,
+): string | undefined {
+  if (!sourceUrl || !brand || !isNonPurchasePage(sourceUrl)) {
+    return sourceUrl
+  }
+
+  const tokens = brandTokens(brand)
+  const modelTokens = extractModelTokens(productName ?? '')
+  let best: { url: string; score: number } | null = null
+
+  for (const hit of hits) {
+    if (isNonPurchasePage(hit.url)) {
+      continue
+    }
+
+    const official = isBrandOfficialHost(safeHostname(hit.url), tokens)
+    // 官网的商品页路径千奇百怪（/electronics/xxx/wh-1000xm5），
+    // 但路径里带着型号词元的页面基本就是那一款。
+    // URL 里的型号常带连字符（wh-1000xm5），抽出来的词元却是 WH1000XM5，比较前先去符号。
+    const compactKey = pageKey(hit.url).replace(/[^a-z0-9]+/g, '')
+    const modelMatched = modelTokens.some((token) =>
+      compactKey.includes(token.toLowerCase().replace(/[^a-z0-9]+/g, '')),
+    )
+
+    if (!isPurchasePage(hit.url) && !(official && modelMatched)) {
+      continue
+    }
+
+    const score = (official ? 2 : 1) + (modelMatched ? 2 : 0)
+
+    if (!best || score > best.score) {
+      best = { url: hit.url, score }
+    }
+  }
+
+  if (!best) {
+    return sourceUrl
+  }
+
+  console.log(`[llmBuyer] source_url 从非商品页换成商品页：${best.url}`)
+  return best.url
+}
+
 /**
  * 原生联网侦察：一次调用内由 DeepSeek 完成「决定搜什么 → 搜 → 作答」。
  *
@@ -763,7 +885,44 @@ async function runNativeSearchRecon(
   }
 
   timings.llmMs = Date.now() - startedAt
-  const { queries, hits, notes } = collectNativeSearch(first.serverToolCalls)
+  let { queries, hits, notes } = collectNativeSearch(first.serverToolCalls)
+
+  /**
+   * 零来源补一次。
+   *
+   * 服务端工具无法被 `tool_choice` 强制，模型偶尔会跳过检索直接凭记忆作答 ——
+   * 那种答案的价格与在售状态没有任何依据，却又长得跟正常结果一模一样。
+   * 所以「一条来源都没拿到」时必须再要一次，而不是默默出卡。
+   * 追问轮本来就该零来源（它没在定品），按「像不像澄清问题」排除掉，避免白花一次调用。
+   */
+  if (hits.length === 0 && !isClarificationReply(first.content)) {
+    console.warn('[llmBuyer] 首轮联网没有拿到任何来源，补一次检索')
+
+    messages.push({ role: 'user', content: NATIVE_SEARCH_RETRY_PROMPT })
+    const retryStartedAt = Date.now()
+
+    try {
+      const second = await requestCompletion(provider, messages, LLM_MAX_TOKENS, timeoutMs, {
+        nativeWebSearch: true,
+      })
+      timings.llmMs += Date.now() - retryStartedAt
+
+      const again = collectNativeSearch(second.serverToolCalls)
+      queries = [...new Set([...queries, ...again.queries])]
+      hits = dedupeHits([...hits, ...again.hits])
+      notes = [...notes, ...again.notes]
+
+      if (!hits.length) {
+        notes.push('补检索后仍无来源')
+      }
+
+      first = second
+    } catch (error) {
+      timings.llmMs += Date.now() - retryStartedAt
+      notes.push(`补检索失败：${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
   const directPayload = parseLlmJson(first.content)
 
   if (directPayload) {
@@ -1586,7 +1745,7 @@ export async function decideProductWithLlm(
   const errors: string[] = []
   const defaultTimeoutMs = Number(config.llmTimeoutMs) || DEFAULT_LLM_TIMEOUT_MS
 
-  for (const provider of providers) {
+  for (const [index, provider] of providers.entries()) {
     if (isProviderCoolingDown(provider.label)) {
       errors.push(`${provider.label} 处于熔断冷却期`)
       continue
@@ -1606,6 +1765,22 @@ export async function decideProductWithLlm(
       const product = normalizeProduct(payload.locked_product)
       const action = payload.action === 'recommend' || product ? 'recommend' : 'clarify'
       const chatReply = sanitizeCopyText(payload.chat_reply)
+
+      // 模型给的链接常是手册 / 支持页：官方、可达、但点进去买不了。
+      // 检索结果里有真正的商品页时换成它（见 preferPurchasePage）。
+      if (action === 'recommend' && product) {
+        product.source_url =
+          preferPurchasePage(product.source_url, product.brand, hits, product.name) ?? product.source_url
+      }
+
+      // 定品却没有一条来源 = 这一轮的型号与价格没有任何依据。
+      // 不在界面上编造「已联网」，但必须留下痕迹，别让它静默发生。
+      const searchNote =
+        action === 'recommend' && hits.length === 0
+          ? queries.length
+            ? '检索已发起但未获得任何来源'
+            : '模型未发起联网检索'
+          : undefined
 
       if (action === 'recommend' && !product) {
         throw new Error(`${provider.label} 声称定品但商品字段不完整`)
@@ -1633,6 +1808,11 @@ export async function decideProductWithLlm(
         latencyMs: llmLatencyMs,
         searchQueries: queries,
         searched: hits.length > 0,
+        searchNote,
+      }
+
+      if (searchNote) {
+        console.warn(`[llmBuyer] 定品未经联网核实：${searchNote}（检索词 ${queries.length} 条）`)
       }
 
       try {
@@ -1904,6 +2084,7 @@ export async function decideProductWithLlm(
         latencyMs: llmLatencyMs,
         searchQueries: queries,
         searched: hits.length > 0,
+        searchNote,
         sourceVerified,
         imageFrom,
       }
@@ -1926,6 +2107,7 @@ export async function decideProductWithLlm(
           latencyMs: delivered.latencyMs,
           searchQueries: delivered.searchQueries,
           searched: delivered.searched,
+          searchNote: delivered.searchNote,
           sourceVerified,
           imageFrom,
         }

@@ -390,6 +390,7 @@ async function runLlmPrimary(
           latency_ms: locked.latencyMs,
           searched: locked.searched,
           search_queries: locked.searchQueries,
+          search_note: locked.searchNote,
           search_source: describeSearchSource(config),
         })
       },
@@ -416,6 +417,7 @@ async function runLlmPrimary(
         latency_ms: outcome.latencyMs,
         searched: outcome.searched,
         search_queries: outcome.searchQueries,
+        search_note: outcome.searchNote,
         search_source: describeSearchSource(config),
         source_verified: outcome.sourceVerified,
         image_from: outcome.imageFrom,

@@ -152,6 +152,25 @@ async function main() {
   const recMeta = finalMeta(recommend.events)
   const expectedEngine = FALLBACK_MODE ? 'catalog' : 'llm'
   check(`引擎为 ${expectedEngine}`, recMeta.engine === expectedEngine, `实际 ${recMeta.engine ?? '无'}`)
+
+  if (expectedEngine === 'llm') {
+    check(
+      '联网来源标记为 deepseek_web_search',
+      recMeta.search_source === 'deepseek_web_search',
+      `实际 ${recMeta.search_source ?? '无'}`,
+    )
+    check(
+      'searched=true 时必须带检索词',
+      recMeta.searched !== true || (Array.isArray(recMeta.search_queries) && recMeta.search_queries.length > 0),
+      `searched=${recMeta.searched} queries=${JSON.stringify(recMeta.search_queries ?? null)}`,
+    )
+    // 零来源是允许发生的，但不允许静默：必须能说清是「没搜」还是「搜了没结果」。
+    check(
+      'searched=false 时带 search_note',
+      recMeta.searched !== false || (typeof recMeta.search_note === 'string' && recMeta.search_note.length > 0),
+      `searched=${recMeta.searched} note=${recMeta.search_note ?? '无'}`,
+    )
+  }
   if (product) {
     console.log(`     ↳ 定品结果：${product.brand} ${product.name} · ${product.price_range}`)
   }

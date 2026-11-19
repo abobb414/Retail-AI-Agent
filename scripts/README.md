@@ -57,7 +57,10 @@ node --experimental-strip-types scripts/test-image-model-tokens.mjs
 # 品牌标兜底的域名候选：防第三方站 favicon（smzdm / 京东 / 知乎）冒充品牌官方标
 node --experimental-strip-types scripts/test-brand-logo.mjs
 
-# 定品线路（主 + 备用）：顺序、超时、label 去重、质检跟随哪条线路
+# 原生联网：server_tool_calls 解析、零来源判定、手册页换商品页
+node --experimental-strip-types scripts/test-native-search.mjs
+
+# 定品线路：组装、原生联网启用条件、熔断期质检跟随
 node --experimental-strip-types scripts/test-llm-lines.mjs
 ```
 
