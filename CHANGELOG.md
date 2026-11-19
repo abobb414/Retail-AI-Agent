@@ -19,6 +19,8 @@
 
 取舍：少一条「换出口」的备用大模型，但这条备用与官方本来就是同一个供应商；真正的可用性保险仍是 Worker 商品库兜底，未改动。
 
+验证（2026-11-19 线上）：Vercel Production 部署 Ready 后，对 `https://retail.abobb.com/api/chat` 问「预算 1500 的头戴降噪耳机，地铁通勤」—— 23.1s 出卡，`search_source=deepseek_web_search`、`searched=true`、5 条检索式 / 12 个来源、`source_verified=true`、`image_from=official_search`；运行日志为首行 `可用线路 1 条： deepseek-flash@api.deepseek.com（原生联网）`。
+
 ## [2026-11-05] — 目录结构：Worker 代码收进 `worker/`
 
 用户原话：
